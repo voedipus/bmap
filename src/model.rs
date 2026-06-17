@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MPL-2.0
-
 use mapfile_parser::MapFile;
 use std::path::PathBuf;
 

@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: MPL-2.0
-
 mod app;
 mod i18n;
 mod model;

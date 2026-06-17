@@ -1,4 +1,4 @@
-app-title = BMAP
+app-title = bmap
 description = MAP file memory analyzer
 repository = https://github.com/bmap
 about = About

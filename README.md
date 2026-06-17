@@ -31,5 +31,4 @@ cargo build --release
 The binary will be at `target/release/bmap`.
 
 ## License
-
-MPL-2.0
+MIT

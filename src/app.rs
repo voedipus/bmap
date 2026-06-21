@@ -208,7 +208,7 @@ impl AppModel {
             checkbox(self.show_debug)
                 .on_toggle(Message::ToggleDebug)
                 .size(14),
-            text("Debug symbols").size(13),
+            text(fl!("label-debug")).size(13),
         ]
         .align_y(Alignment::Center)
         .spacing(4);
@@ -237,23 +237,13 @@ impl AppModel {
             })
             .collect();
 
-        let filename = if let Some(p) = &self.file_path {
-            p.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            String::new()
-        };
-
         container(
             row![
                 open_btn,
-                debug_toggle,
                 space::horizontal().width(Length::Fixed(8.0)),
                 row(nav_buttons).spacing(4),
                 space::horizontal(),
-                text(filename).size(13),
+                debug_toggle,
             ]
             .align_y(Alignment::Center)
             .spacing(8)
@@ -366,8 +356,8 @@ impl AppModel {
             Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
 
         let header = row![
-            Self::header_cell_label("Source".into(), Length::Fill),
-            Self::header_cell_label("Module".into(), Length::Fixed(200.0)),
+            Self::header_cell_label(fl!("column-source"), Length::Fill),
+            Self::header_cell_label(fl!("column-module"), Length::Fixed(200.0)),
             Self::header_cell_button(size_label, Length::Fixed(140.0), Message::SortGroup),
             Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
         ];
@@ -427,7 +417,7 @@ impl AppModel {
             Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
 
         let header = row![
-            Self::header_cell_label("Archive".into(), Length::Fill),
+            Self::header_cell_label(fl!("column-archive"), Length::Fill),
             Self::header_cell_button(size_label, Length::Fixed(140.0), Message::SortGroup),
             Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
         ];
@@ -475,9 +465,9 @@ impl AppModel {
         }
 
         let header = row![
-            Self::header_cell_label("Section".into(), Length::Fill),
-            Self::header_cell_label("Size".into(), Length::Fixed(140.0)),
-            Self::header_cell_label("Symbols".into(), Length::Fixed(90.0)),
+            Self::header_cell_label(fl!("column-section"), Length::Fill),
+            Self::header_cell_label(fl!("column-size"), Length::Fixed(140.0)),
+            Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
         ];
 
         let mut rows = Vec::with_capacity(self.section_categories.len() * 2);
@@ -574,7 +564,7 @@ impl AppModel {
                 button(
                     row![
                         text("\u{2190}").size(14),
-                        text(format!("Back to files ({short_name})")).size(14)
+                        text(format!("{} ({})", fl!("label-back-to-files"), short_name)).size(14)
                     ]
                     .align_y(Alignment::Center)
                     .spacing(6),
@@ -623,7 +613,7 @@ impl AppModel {
         }
 
         let body: Element<'_, Message> = if rows.is_empty() {
-            text("No matching symbols.").into()
+            text(fl!("label-no-matches")).into()
         } else {
             scrollable(column(rows).spacing(1))
                 .height(Length::Fill)
@@ -654,10 +644,10 @@ impl AppModel {
             (fl!("code-size"), format_size(s.text_size)),
             (fl!("data-size"), format_size(s.data_size + s.rodata_size)),
             (fl!("bss-size"), format_size(s.bss_size)),
-            ("Other".to_string(), format_size(s.other_size)),
-            ("Symbols".to_string(), s.num_symbols.to_string()),
-            ("Files".to_string(), s.num_files.to_string()),
-            ("Section types".to_string(), s.num_sections.to_string()),
+            (fl!("label-other"), format_size(s.other_size)),
+            (fl!("symbols"), s.num_symbols.to_string()),
+            (fl!("label-object-files"), s.num_files.to_string()),
+            (fl!("label-section-types"), s.num_sections.to_string()),
         ];
 
         let items: Vec<Element<'_, Message>> = summary_items
@@ -692,7 +682,7 @@ impl AppModel {
         } else {
             column![
                 text(fl!("no-file-loaded")).size(24),
-                text("Click \"Open\" to load a linker MAP file.").size(16),
+                text(fl!("open-instruction")).size(16),
             ]
             .spacing(8)
             .align_x(Alignment::Center)

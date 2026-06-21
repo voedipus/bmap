@@ -4,6 +4,10 @@ A fast, native GUI for inspecting linker MAP files. Built with [iced](https://ic
 
 Load a `.map` file produced by GNU ld, Clang LLD, or Metrowerks, and explore your binary's memory layout through sortable tables and drill-down views.
 
+<p align="center">
+  <img src="assets/showcase.gif" alt="Showcase">
+</p>
+
 ## Features
 
 - **Source Files** — grouped by source file with archive module, searchable

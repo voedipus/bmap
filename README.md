@@ -6,13 +6,15 @@ Load a `.map` file produced by GNU ld, Clang LLD, or Metrowerks, and explore you
 
 ## Features
 
-- **Source Files** — grouped by source file with archive module name, searchable
-- **Modules** — grouped by `.a` archive file
+- **Source Files** — grouped by source file with archive module, searchable
+- **Modules** — grouped by `.a` archive file, searchable
 - **Sections** — consolidated section categories (.text, .data, .rodata, .bss) expandable to sub-types
 - **Drill-down** — click any row to see individual symbols with size, address, and percentage
 - **Debug symbols filter** — toggle to show/hide debug sections (.debug_*, .comment, .note, .ARM.*)
 - **Summary** — total size and breakdown by Code, Data, BSS, and Other
 - **System library filter** — automatically excludes symbols from libc, libm, libgcc, etc.
+- **Light/dark theme** — follows system preference automatically
+- **Internationalization** — English and Russian translations
 
 ## Usage
 

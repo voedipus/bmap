@@ -418,7 +418,9 @@ pub fn symbols_view(model: &AppModel) -> Element<'_, Message> {
 
     let header = row![
         space::horizontal(),
+        hdr_lbl(fl!("column-address"), Length::Fixed(150.0), Alignment::End),
         hdr_btn(hsz, Length::Fixed(110.0), Message::SortBy(SortColumn::Size)),
+        hdr_lbl(fl!("column-percentage"), Length::Fixed(80.0), Alignment::End),
     ];
     content = content.push(header);
 

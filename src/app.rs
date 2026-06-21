@@ -20,25 +20,24 @@ pub struct AppModel {
     window_title: String,
     current_page: Page,
 
-    // MAP file data
     #[allow(dead_code)]
     map_file: Option<MapFile>,
     all_entries: Vec<MapEntry>,
-    filtered_entries: Vec<MapEntry>,
     module_groups: Vec<GroupSummary>,
+    archive_groups: Vec<GroupSummary>,
     section_groups: Vec<GroupSummary>,
+    section_categories: Vec<GroupSummary>,
     summary: FileSummary,
     file_path: Option<PathBuf>,
     error: Option<String>,
 
-    // View state
     search_query: String,
     sort_column: SortColumn,
     sort_ascending: bool,
     show_debug: bool,
 
-    // Drill-down state
     drilldown_group: Option<String>,
+    expanded_section: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,18 +52,20 @@ pub enum Message {
     ToggleDebug(bool),
     DrillInto(String),
     DrillOut,
+    ToggleSection(String),
 }
 
 impl AppModel {
     pub fn new() -> (Self, Task<Message>) {
         let app = AppModel {
             window_title: fl!("app-title"),
-            current_page: Page::AllSymbols,
+            current_page: Page::Files,
             map_file: None,
             all_entries: Vec::new(),
-            filtered_entries: Vec::new(),
             module_groups: Vec::new(),
+            archive_groups: Vec::new(),
             section_groups: Vec::new(),
+            section_categories: Vec::new(),
             summary: FileSummary::default(),
             file_path: None,
             error: None,
@@ -73,6 +74,7 @@ impl AppModel {
             sort_ascending: false,
             show_debug: false,
             drilldown_group: None,
+            expanded_section: None,
         };
         (app, Task::none())
     }
@@ -94,7 +96,6 @@ impl AppModel {
                             .set_title(&fl!("open-map-file"))
                             .add_filter("MAP files", &["map"])
                             .add_filter("All files", &["*"]);
-
                         match dialog.pick_file().await {
                             Some(handle) => {
                                 let path = handle.path().to_path_buf();
@@ -112,7 +113,6 @@ impl AppModel {
                     std::convert::identity,
                 );
             }
-
             Message::FileLoaded(path, contents) => {
                 self.file_path = Some(path.clone());
                 self.error = None;
@@ -121,21 +121,17 @@ impl AppModel {
                 self.recompute_groups();
                 self.map_file = Some(map);
                 self.drilldown_group = None;
-                self.update_filtered_entries();
+                self.expanded_section = None;
                 self.update_title();
             }
-
             Message::FileError(why) => {
                 if !why.is_empty() {
                     self.error = Some(why);
                 }
             }
-
             Message::SearchChanged(query) => {
                 self.search_query = query;
-                self.update_filtered_entries();
             }
-
             Message::SortBy(col) => {
                 if self.sort_column == col {
                     self.sort_ascending = !self.sort_ascending;
@@ -143,59 +139,57 @@ impl AppModel {
                     self.sort_column = col;
                     self.sort_ascending = false;
                 }
-                self.update_filtered_entries();
             }
-
             Message::SortGroup => {
                 self.sort_ascending = !self.sort_ascending;
                 sort_groups(&mut self.module_groups, self.sort_ascending);
                 sort_groups(&mut self.section_groups, self.sort_ascending);
             }
-
             Message::SelectPage(page) => {
                 self.current_page = page;
                 self.drilldown_group = None;
+                self.expanded_section = None;
                 self.update_title();
             }
-
             Message::ToggleDebug(show) => {
                 self.show_debug = show;
                 self.recompute_groups();
-                self.update_filtered_entries();
             }
-
             Message::DrillInto(group_name) => {
                 self.drilldown_group = Some(group_name);
-                self.update_filtered_entries();
             }
-
             Message::DrillOut => {
                 self.drilldown_group = None;
                 self.search_query.clear();
-                self.update_filtered_entries();
+            }
+            Message::ToggleSection(name) => {
+                if self.expanded_section.as_deref() == Some(&name) {
+                    self.expanded_section = None;
+                } else {
+                    self.expanded_section = Some(name);
+                }
             }
         }
-
         Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         let content: Element<_> = match self.current_page {
-            Page::AllSymbols => self.symbols_view(),
-            Page::ByModule => {
+            Page::Files => {
                 if self.drilldown_group.is_some() {
                     self.symbols_view()
                 } else {
-                    self.group_view(&self.module_groups, false)
+                    self.files_view()
                 }
             }
-            Page::BySection => {
+            Page::Modules => {
                 if self.drilldown_group.is_some() {
                     self.symbols_view()
                 } else {
-                    self.group_view(&self.section_groups, true)
+                    self.modules_view()
                 }
             }
+            Page::Sections => self.sections_view(),
             Page::Summary => self.summary_view(),
         };
 
@@ -214,15 +208,15 @@ impl AppModel {
             checkbox(self.show_debug)
                 .on_toggle(Message::ToggleDebug)
                 .size(14),
-            text("Debug").size(13),
+            text("Debug symbols").size(13),
         ]
         .align_y(Alignment::Center)
         .spacing(4);
 
         let pages = [
-            (Page::AllSymbols, "\u{2630}", fl!("all-symbols")),
-            (Page::ByModule, "\u{1f4c1}", fl!("by-module")),
-            (Page::BySection, "\u{2195}", fl!("by-section")),
+            (Page::Files, "\u{1f4e6}", fl!("files")),
+            (Page::Modules, "\u{1f4c1}", fl!("modules")),
+            (Page::Sections, "\u{2195}", fl!("sections")),
             (Page::Summary, "\u{2261}", fl!("summary")),
         ];
 
@@ -280,7 +274,9 @@ impl AppModel {
             filter_debug_entries(&self.all_entries)
         };
         self.module_groups = group_by_module(&entries);
+        self.archive_groups = group_by_archive(&entries);
         self.section_groups = group_by_section(&entries);
+        self.section_categories = group_section_categories(&entries);
         self.summary = compute_file_summary(&entries);
     }
 
@@ -293,27 +289,12 @@ impl AppModel {
         self.window_title = title;
     }
 
-    fn update_filtered_entries(&mut self) {
-        let base_entries: Vec<MapEntry> = if self.show_debug {
+    fn filtered_base_entries(&self) -> Vec<MapEntry> {
+        if self.show_debug {
             self.all_entries.clone()
         } else {
             filter_debug_entries(&self.all_entries)
-        };
-
-        // Apply drill-down filter first
-        let entries = if let Some(ref group) = self.drilldown_group {
-            match self.current_page {
-                Page::ByModule => filter_by_module(&base_entries, group),
-                Page::BySection => filter_by_section(&base_entries, group),
-                _ => base_entries,
-            }
-        } else {
-            base_entries
-        };
-
-        let mut filtered = filter_entries(&entries, &self.search_query);
-        sort_entries(&mut filtered, self.sort_column, self.sort_ascending);
-        self.filtered_entries = filtered;
+        }
     }
 
     fn sort_indicator(&self, col: SortColumn) -> &'static str {
@@ -358,12 +339,230 @@ impl AppModel {
             .into()
     }
 
-    fn symbols_view(&self) -> Element<'_, Message> {
-        if self.filtered_entries.is_empty() && self.all_entries.is_empty() {
+    fn table_divider() -> Element<'static, Message> {
+        container(space::horizontal())
+            .height(Length::Fixed(1.0))
+            .width(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.22, 0.22, 0.28, 1.0).into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    // ── Files View ───────────────────────────────────────────
+
+    fn files_view(&self) -> Element<'_, Message> {
+        if self.module_groups.is_empty() {
             return self.empty_view();
         }
 
-        // Breadcrumb / back button when drilled in
+        let search = text_input(&fl!("search-by-source"), &self.search_query)
+            .on_input(Message::SearchChanged)
+            .width(Length::Fill)
+            .padding(8);
+
+        let size_label =
+            Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
+
+        let header = row![
+            Self::header_cell_label("Source".into(), Length::Fill),
+            Self::header_cell_label("Module".into(), Length::Fixed(200.0)),
+            Self::header_cell_button(size_label, Length::Fixed(140.0), Message::SortGroup),
+            Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
+        ];
+
+        let q = self.search_query.to_lowercase();
+        let filtered: Vec<&GroupSummary> = self
+            .module_groups
+            .iter()
+            .filter(|g| {
+                q.is_empty()
+                    || g.name.to_lowercase().contains(&q)
+                    || derive_source_name(&g.name).to_lowercase().contains(&q)
+                    || derive_archive_name(&g.name).to_lowercase().contains(&q)
+            })
+            .collect();
+
+        let mut rows = Vec::with_capacity(filtered.len() * 2);
+        for g in &filtered {
+            rows.push(Self::table_divider());
+            let source = derive_source_name(&g.name);
+            let module = derive_archive_name(&g.name);
+            let item = button(row![
+                Self::data_cell(source, Length::Fill),
+                Self::data_cell(module, Length::Fixed(200.0)),
+                Self::data_cell(format_size(g.total_size), Length::Fixed(140.0)),
+                Self::data_cell(g.num_symbols.to_string(), Length::Fixed(90.0)),
+            ])
+            .on_press(Message::DrillInto(g.name.clone()))
+            .padding(0)
+            .width(Length::Fill)
+            .style(button::text);
+            rows.push(item.into());
+        }
+
+        let body = scrollable(column(rows).spacing(0)).height(Length::Fill);
+
+        column![search, header, Self::table_divider(), body,]
+            .spacing(4)
+            .padding(8)
+            .height(Length::Fill)
+            .into()
+    }
+
+    // ── Modules View ─────────────────────────────────────────
+
+    fn modules_view(&self) -> Element<'_, Message> {
+        if self.archive_groups.is_empty() {
+            return self.empty_view();
+        }
+
+        let search = text_input(&fl!("search-by-module"), &self.search_query)
+            .on_input(Message::SearchChanged)
+            .width(Length::Fill)
+            .padding(8);
+
+        let size_label =
+            Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
+
+        let header = row![
+            Self::header_cell_label("Archive".into(), Length::Fill),
+            Self::header_cell_button(size_label, Length::Fixed(140.0), Message::SortGroup),
+            Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
+        ];
+
+        let q = self.search_query.to_lowercase();
+        let filtered: Vec<&GroupSummary> = self
+            .archive_groups
+            .iter()
+            .filter(|g| q.is_empty() || g.name.to_lowercase().contains(&q))
+            .collect();
+
+        let mut rows = Vec::with_capacity(filtered.len() * 2);
+        for g in &filtered {
+            rows.push(Self::table_divider());
+            let display_name = PathBuf::from(&g.name)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| g.name.clone());
+            let item = button(row![
+                Self::data_cell(display_name, Length::Fill),
+                Self::data_cell(format_size(g.total_size), Length::Fixed(140.0)),
+                Self::data_cell(g.num_symbols.to_string(), Length::Fixed(90.0)),
+            ])
+            .on_press(Message::DrillInto(g.name.clone()))
+            .padding(0)
+            .width(Length::Fill)
+            .style(button::text);
+            rows.push(item.into());
+        }
+
+        let body = scrollable(column(rows).spacing(0)).height(Length::Fill);
+
+        column![search, header, Self::table_divider(), body,]
+            .spacing(4)
+            .padding(8)
+            .height(Length::Fill)
+            .into()
+    }
+
+    // ── Sections View (table of categories + expandable subs) ──
+
+    fn sections_view(&self) -> Element<'_, Message> {
+        if self.section_categories.is_empty() {
+            return self.empty_view();
+        }
+
+        let header = row![
+            Self::header_cell_label("Section".into(), Length::Fill),
+            Self::header_cell_label("Size".into(), Length::Fixed(140.0)),
+            Self::header_cell_label("Symbols".into(), Length::Fixed(90.0)),
+        ];
+
+        let mut rows = Vec::with_capacity(self.section_categories.len() * 2);
+        for g in &self.section_categories {
+            rows.push(Self::table_divider());
+            let is_open = self.expanded_section.as_deref() == Some(&g.name);
+            let arrow = if is_open { "\u{25BC}" } else { "\u{25B6}" };
+
+            // Category row — click to expand
+            let cat_row = button(
+                row![
+                    text(format!("{arrow}  {}", g.name))
+                        .size(14)
+                        .width(Length::Fill),
+                    text(format_size(g.total_size))
+                        .size(14)
+                        .width(Length::Fixed(140.0)),
+                    text(g.num_symbols.to_string())
+                        .size(14)
+                        .width(Length::Fixed(90.0)),
+                ]
+                .padding([4, 8]),
+            )
+            .on_press(Message::ToggleSection(g.name.clone()))
+            .width(Length::Fill)
+            .style(button::text);
+            rows.push(cat_row.into());
+
+            if is_open {
+                // Show the sub-sections that belong to this category
+                let sub_start = if g.name == "other" { "" } else { &g.name };
+                let mut sub_rows: Vec<Element<'_, Message>> = Vec::new();
+                for sg in &self.section_groups {
+                    let matches = if g.name == "other" {
+                        !sg.name.starts_with(".text")
+                            && !sg.name.starts_with(".data")
+                            && !sg.name.starts_with(".rodata")
+                            && !sg.name.starts_with(".bss")
+                            && !sg.name.starts_with(".sbss")
+                    } else {
+                        sg.name.starts_with(sub_start)
+                    };
+                    if matches {
+                        sub_rows.push(
+                            row![
+                                Self::data_cell(format!("    {}", sg.name), Length::Fill),
+                                Self::data_cell(format_size(sg.total_size), Length::Fixed(140.0),),
+                                Self::data_cell(sg.num_symbols.to_string(), Length::Fixed(90.0),),
+                            ]
+                            .into(),
+                        );
+                    }
+                }
+                if !sub_rows.is_empty() {
+                    rows.push(column(sub_rows).spacing(1).into());
+                }
+            }
+        }
+
+        let body = scrollable(column(rows).spacing(0)).height(Length::Fill);
+
+        column![header, Self::table_divider(), body,]
+            .spacing(0)
+            .padding(8)
+            .height(Length::Fill)
+            .into()
+    }
+
+    // ── Symbols View (drill-down) ─────────────────────────────
+
+    fn symbols_view(&self) -> Element<'_, Message> {
+        let base = self.filtered_base_entries();
+        let filtered = if let Some(ref group) = self.drilldown_group {
+            filter_by_module(&base, group)
+        } else {
+            base
+        };
+
+        let mut filtered2 = filter_entries(&filtered, &self.search_query);
+        sort_entries(&mut filtered2, self.sort_column, self.sort_ascending);
+
+        if filtered2.is_empty() && self.all_entries.is_empty() {
+            return self.empty_view();
+        }
+
         let mut content = column![].spacing(4);
 
         if let Some(ref group) = self.drilldown_group {
@@ -375,7 +574,7 @@ impl AppModel {
                 button(
                     row![
                         text("\u{2190}").size(14),
-                        text(format!("Back to groups ({short_name})")).size(14)
+                        text(format!("Back to files ({short_name})")).size(14)
                     ]
                     .align_y(Alignment::Center)
                     .spacing(6),
@@ -392,8 +591,7 @@ impl AppModel {
             .padding(8);
         content = content.push(search);
 
-        let ind = |col: SortColumn| self.sort_indicator(col);
-        let h3 = Self::make_label(&fl!("column-size"), ind(SortColumn::Size));
+        let h3 = Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
 
         let header = row![
             Self::header_cell_label(fl!("column-name"), Length::Fill),
@@ -405,21 +603,23 @@ impl AppModel {
 
         let total = self.summary.total_size.max(1);
 
-        let row_count = self.filtered_entries.len().min(5000);
+        let row_count = filtered2.len().min(5000);
         let mut rows = Vec::with_capacity(row_count);
-        for entry in self.filtered_entries.iter().take(row_count) {
+        for entry in filtered2.iter().take(row_count) {
             let pct = if total > 0 {
                 (entry.size as f64 / total as f64) * 100.0
             } else {
                 0.0
             };
-            let item = row![
-                Self::data_cell(entry.name.clone(), Length::Fill),
-                Self::data_cell(format!("0x{:08X}", entry.address), Length::Fixed(160.0)),
-                Self::data_cell(format_size(entry.size), Length::Fixed(120.0)),
-                Self::data_cell(format!("{pct:.2}%"), Length::Fixed(90.0)),
-            ];
-            rows.push(item.into());
+            rows.push(
+                row![
+                    Self::data_cell(entry.name.clone(), Length::Fill),
+                    Self::data_cell(format!("0x{:08X}", entry.address), Length::Fixed(160.0),),
+                    Self::data_cell(format_size(entry.size), Length::Fixed(120.0)),
+                    Self::data_cell(format!("{pct:.2}%"), Length::Fixed(90.0)),
+                ]
+                .into(),
+            );
         }
 
         let body: Element<'_, Message> = if rows.is_empty() {
@@ -434,80 +634,7 @@ impl AppModel {
         content.padding(8).height(Length::Fill).into()
     }
 
-    fn group_view(&self, groups: &[GroupSummary], is_section: bool) -> Element<'_, Message> {
-        if groups.is_empty() {
-            return self.empty_view();
-        }
-
-        let name_label =
-            Self::make_label(&fl!("column-name"), self.sort_indicator(SortColumn::Name));
-        let size_label =
-            Self::make_label(&fl!("column-size"), self.sort_indicator(SortColumn::Size));
-
-        let header = row![
-            Self::header_cell_button(name_label, Length::Fill, Message::SortGroup),
-            Self::header_cell_button(size_label, Length::Fixed(140.0), Message::SortGroup),
-            Self::header_cell_label(fl!("symbols"), Length::Fixed(90.0)),
-        ];
-
-        let mut rows = Vec::with_capacity(groups.len());
-        for g in groups {
-            let display_name = if is_section {
-                g.name.clone()
-            } else {
-                PathBuf::from(&g.name)
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_else(|| g.name.clone())
-            };
-            // Use the full group name as the drill-down key
-            let item = button(row![
-                Self::data_cell(display_name.clone(), Length::Fill),
-                Self::data_cell(format_size(g.total_size), Length::Fixed(140.0)),
-                Self::data_cell(g.num_symbols.to_string(), Length::Fixed(90.0)),
-            ])
-            .on_press(Message::DrillInto(g.name.clone()))
-            .padding(0)
-            .width(Length::Fill)
-            .style(button::text);
-            rows.push(item.into());
-        }
-
-        let body = scrollable(column(rows).spacing(1)).height(Length::Fill);
-
-        column![header, body]
-            .spacing(4)
-            .padding(8)
-            .height(Length::Fill)
-            .into()
-    }
-
-    fn empty_view(&self) -> Element<'_, Message> {
-        let msg: Element<'_, Message> = if let Some(err) = &self.error {
-            column![
-                text(fl!("error-loading")).size(24),
-                text(err.clone()).size(16),
-            ]
-            .spacing(8)
-            .align_x(Alignment::Center)
-            .into()
-        } else {
-            column![
-                text(fl!("no-file-loaded")).size(24),
-                text("Click \"Open\" to load a linker MAP file.").size(16),
-            ]
-            .spacing(8)
-            .align_x(Alignment::Center)
-            .into()
-        };
-
-        container(msg)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
-    }
+    // ── Summary ──────────────────────────────────────────────
 
     fn summary_view(&self) -> Element<'_, Message> {
         if self.all_entries.is_empty() {
@@ -550,27 +677,85 @@ impl AppModel {
             .height(Length::Fill)
             .into()
     }
+
+    // ── Empty ────────────────────────────────────────────────
+
+    fn empty_view(&self) -> Element<'_, Message> {
+        let msg: Element<'_, Message> = if let Some(err) = &self.error {
+            column![
+                text(fl!("error-loading")).size(24),
+                text(err.clone()).size(16),
+            ]
+            .spacing(8)
+            .align_x(Alignment::Center)
+            .into()
+        } else {
+            column![
+                text(fl!("no-file-loaded")).size(24),
+                text("Click \"Open\" to load a linker MAP file.").size(16),
+            ]
+            .spacing(8)
+            .align_x(Alignment::Center)
+            .into()
+        };
+
+        container(msg)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+    }
 }
 
-/// Filter entries matching a specific module filepath.
+// ── Helpers ─────────────────────────────────────────────────
+
+fn derive_source_name(object_path: &str) -> String {
+    let inner = if let Some(p) = object_path.find('(') {
+        &object_path[p + 1..object_path.len() - 1]
+    } else {
+        object_path
+    };
+    PathBuf::from(inner)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn derive_archive_name(object_path: &str) -> String {
+    if let Some(p) = object_path.find('(') {
+        let archive = &object_path[..p];
+        PathBuf::from(archive)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| archive.to_string())
+    } else {
+        PathBuf::from(object_path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| object_path.to_string())
+    }
+}
+
 fn filter_by_module(entries: &[MapEntry], filepath: &str) -> Vec<MapEntry> {
     entries
         .iter()
-        .filter(|e| e.filepath.to_string_lossy() == filepath)
+        .filter(|e| {
+            let ep = e.filepath.to_string_lossy();
+            // Exact match (for source file drill-down)
+            if ep == filepath {
+                return true;
+            }
+            // Archive match: "libfoo.a" matches "libfoo.a(main.c.o)"
+            if let Some(p) = ep.find('(') {
+                return &ep[..p] == filepath;
+            }
+            false
+        })
         .cloned()
         .collect()
 }
 
-/// Filter entries matching a specific section type.
-fn filter_by_section(entries: &[MapEntry], section: &str) -> Vec<MapEntry> {
-    entries
-        .iter()
-        .filter(|e| e.section_type == section)
-        .cloned()
-        .collect()
-}
-
-/// Filter out entries that belong to debug-related sections.
 fn filter_debug_entries(entries: &[MapEntry]) -> Vec<MapEntry> {
     entries
         .iter()
@@ -592,8 +777,8 @@ fn is_debug_section(section: &str) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
-    AllSymbols,
-    ByModule,
-    BySection,
+    Files,
+    Modules,
+    Sections,
     Summary,
 }

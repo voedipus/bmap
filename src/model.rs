@@ -96,7 +96,45 @@ fn is_system_library(path: &PathBuf) -> bool {
         || s.contains("crtn")
 }
 
-/// Build group summaries by module (object file path).
+/// Build group summaries by archive (.a) file.
+pub fn group_by_archive(entries: &[MapEntry]) -> Vec<GroupSummary> {
+    use std::collections::BTreeMap;
+    let mut groups: BTreeMap<String, GroupSummary> = BTreeMap::new();
+    for e in entries {
+        let path = e.filepath.to_string_lossy().to_string();
+        let key = if let Some(p) = path.find('(') {
+            path[..p].to_string()
+        } else {
+            path
+        };
+        let g = groups.entry(key.clone()).or_insert(GroupSummary {
+            name: key,
+            total_size: 0,
+            text_size: 0,
+            data_size: 0,
+            rodata_size: 0,
+            bss_size: 0,
+            num_symbols: 0,
+        });
+        g.total_size += e.size;
+        g.num_symbols += 1;
+        let sec = e.section_type.as_str();
+        if sec.starts_with(".text") {
+            g.text_size += e.size;
+        } else if sec.starts_with(".data") {
+            g.data_size += e.size;
+        } else if sec.starts_with(".rodata") {
+            g.rodata_size += e.size;
+        } else if sec.starts_with(".bss") || sec.starts_with(".sbss") {
+            g.bss_size += e.size;
+        }
+    }
+    let mut result: Vec<GroupSummary> = groups.into_values().collect();
+    result.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+    result
+}
+
+/// Build group summaries by source file stem.
 pub fn group_by_module(entries: &[MapEntry]) -> Vec<GroupSummary> {
     use std::collections::BTreeMap;
     let mut groups: BTreeMap<String, GroupSummary> = BTreeMap::new();
@@ -158,6 +196,40 @@ pub fn group_by_section(entries: &[MapEntry]) -> Vec<GroupSummary> {
         }
     }
     let mut result: Vec<GroupSummary> = groups.into_values().collect();
+    result.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+    result
+}
+
+/// Build merged section-type groups (.text, .data, .rodata, .bss, other).
+pub fn group_section_categories(entries: &[MapEntry]) -> Vec<GroupSummary> {
+    let detailed = group_by_section(entries);
+    let mut merged: std::collections::BTreeMap<String, GroupSummary> =
+        std::collections::BTreeMap::new();
+    for g in &detailed {
+        let cat = match g.name.as_str() {
+            s if s.starts_with(".text") => ".text",
+            s if s.starts_with(".data") => ".data",
+            s if s.starts_with(".rodata") => ".rodata",
+            s if s.starts_with(".bss") || s.starts_with(".sbss") => ".bss",
+            _ => "other",
+        };
+        let entry = merged.entry(cat.to_string()).or_insert(GroupSummary {
+            name: cat.to_string(),
+            total_size: 0,
+            text_size: 0,
+            data_size: 0,
+            rodata_size: 0,
+            bss_size: 0,
+            num_symbols: 0,
+        });
+        entry.total_size += g.total_size;
+        entry.num_symbols += g.num_symbols;
+        entry.text_size += g.text_size;
+        entry.data_size += g.data_size;
+        entry.rodata_size += g.rodata_size;
+        entry.bss_size += g.bss_size;
+    }
+    let mut result: Vec<GroupSummary> = merged.into_values().collect();
     result.sort_by(|a, b| b.total_size.cmp(&a.total_size));
     result
 }

@@ -1,6 +1,7 @@
 mod app;
 mod i18n;
 mod model;
+mod views;
 
 fn main() -> iced::Result {
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();

@@ -7,18 +7,13 @@ use iced::{Alignment, Element, Length, Theme};
 use std::path::PathBuf;
 
 pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
-    let open_btn = button(text(fl!("open")))
-        .on_press(Message::OpenFile)
-        .padding([4, 12]);
-
-    let debug_toggle = row![
-        checkbox(model.show_debug)
-            .on_toggle(Message::ToggleDebug)
-            .size(14),
-        text(fl!("label-debug")).size(13),
-    ]
-    .align_y(Alignment::Center)
-    .spacing(4);
+    let open_btn = button(
+        row![text("\u{1F4C2}").size(18), text(fl!("open")).size(15),]
+            .align_y(Alignment::Center)
+            .spacing(7),
+    )
+    .on_press(Message::OpenFile)
+    .padding([8, 20]);
 
     let pages = [
         (Page::Files, "\u{1f4e6}", fl!("files")),
@@ -35,7 +30,7 @@ pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
                 row![text(icon).size(14), text(label).size(13)]
                     .align_y(Alignment::Center)
                     .spacing(4)
-                    .padding([2, 8]),
+                    .padding([4, 10]),
             );
             if !is_active {
                 btn = btn.style(button::secondary);
@@ -44,26 +39,49 @@ pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
         })
         .collect();
 
+    let nav_group = container(row(nav_buttons).spacing(2))
+        .padding(2)
+        .style(|theme| container::Style {
+            background: Some(
+                match theme {
+                    Theme::Light => iced::Color::from_rgba(0.84, 0.84, 0.88, 1.0),
+                    _ => iced::Color::from_rgba(0.12, 0.12, 0.16, 1.0),
+                }
+                .into(),
+            ),
+            border: iced::Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..container::Style::default()
+        });
+
     container(
         row![
             open_btn,
-            space::horizontal().width(Length::Fixed(8.0)),
-            row(nav_buttons).spacing(4),
-            space::horizontal(),
-            debug_toggle,
+            space::horizontal().width(Length::Fixed(16.0)),
+            nav_group,
         ]
         .align_y(Alignment::Center)
-        .spacing(8)
-        .padding([6, 10]),
+        .spacing(12)
+        .padding([8, 14]),
     )
     .style(|theme| container::Style {
         background: Some(
             match theme {
-                Theme::Light => iced::Color::from_rgba(0.88, 0.88, 0.92, 1.0),
-                _ => iced::Color::from_rgba(0.08, 0.08, 0.08, 1.0),
+                Theme::Light => iced::Color::from_rgba(0.92, 0.92, 0.96, 1.0),
+                _ => iced::Color::from_rgba(0.10, 0.10, 0.14, 1.0),
             }
             .into(),
         ),
+        border: iced::Border {
+            color: match theme {
+                Theme::Light => iced::Color::from_rgba(0.78, 0.78, 0.84, 1.0),
+                _ => iced::Color::from_rgba(0.16, 0.16, 0.22, 1.0),
+            },
+            width: 0.0,
+            radius: 0.0.into(),
+        },
         ..container::Style::default()
     })
     .width(Length::Fill)
@@ -72,9 +90,9 @@ pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
 
 fn sort_indicator(model: &AppModel) -> &'static str {
     if model.sort_ascending {
-        "  \u{25B2}"
+        " \u{25B2}"
     } else {
-        "  \u{25BC}"
+        " \u{25BC}"
     }
 }
 
@@ -83,25 +101,35 @@ fn mk_label(base: &str, indicator: &str) -> String {
 }
 
 fn hdr_btn(label: String, width: Length, on_press: Message) -> Element<'static, Message> {
-    button(text(label).size(14).width(Length::Fill))
+    button(
+        text(label)
+            .size(13)
+            .align_x(Alignment::End)
+            .width(Length::Fill),
+    )
+    .width(width)
+    .on_press(on_press)
+    .padding([4, 10])
+    .style(button::text)
+    .into()
+}
+
+fn hdr_lbl(label: String, width: Length, align: Alignment) -> Element<'static, Message> {
+    container(text(label).size(13).align_x(align).width(Length::Fill))
+        .padding([4, 10])
         .width(width)
-        .on_press(on_press)
-        .padding([4, 8])
-        .style(button::text)
         .into()
 }
 
-fn hdr_lbl(label: String, width: Length) -> Element<'static, Message> {
-    container(text(label).size(14))
-        .padding([4, 8])
+fn cell(label: String, width: Length, align: Alignment) -> Element<'static, Message> {
+    container(text(label).size(14).align_x(align).width(Length::Fill))
+        .padding([5, 12])
         .width(width)
         .into()
 }
 
-fn cell(label: String, width: Length) -> Element<'static, Message> {
-    container(text(label).size(14).width(width).height(Length::Shrink))
-        .padding([2, 8])
-        .into()
+fn num_cell(label: String, width: Length) -> Element<'static, Message> {
+    cell(label, width, Alignment::End)
 }
 
 fn divider() -> Element<'static, Message> {
@@ -111,13 +139,34 @@ fn divider() -> Element<'static, Message> {
         .style(|theme| container::Style {
             background: Some(
                 match theme {
-                    Theme::Light => iced::Color::from_rgba(0.78, 0.78, 0.84, 1.0),
-                    _ => iced::Color::from_rgba(0.22, 0.22, 0.28, 1.0),
+                    Theme::Light => iced::Color::from_rgba(0.80, 0.80, 0.86, 1.0),
+                    _ => iced::Color::from_rgba(0.20, 0.20, 0.26, 1.0),
                 }
                 .into(),
             ),
             ..Default::default()
         })
+        .into()
+}
+
+fn filter_bar<'a>(model: &'a AppModel, placeholder: &str) -> Element<'a, Message> {
+    let search = text_input(placeholder, &model.search_query)
+        .on_input(Message::SearchChanged)
+        .padding([7, 12])
+        .width(Length::Fill);
+
+    let debug = row![
+        checkbox(model.show_debug)
+            .on_toggle(Message::ToggleDebug)
+            .size(13),
+        text(fl!("label-debug")).size(12),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(4);
+
+    row![search, debug]
+        .spacing(12)
+        .align_y(Alignment::Center)
         .into()
 }
 
@@ -153,18 +202,13 @@ pub fn files_view(model: &AppModel) -> Element<'_, Message> {
         return empty_view(model);
     }
 
-    let search = text_input(&fl!("search-by-source"), &model.search_query)
-        .on_input(Message::SearchChanged)
-        .width(Length::Fill)
-        .padding(8);
-
     let size_label = mk_label(&fl!("column-size"), sort_indicator(model));
 
     let header = row![
-        hdr_lbl(fl!("column-source"), Length::Fill),
-        hdr_lbl(fl!("column-module"), Length::Fixed(200.0)),
-        hdr_btn(size_label, Length::Fixed(140.0), Message::SortGroup),
-        hdr_lbl(fl!("symbols"), Length::Fixed(90.0)),
+        space::horizontal(),
+        hdr_lbl(fl!("column-module"), Length::Fixed(200.0), Alignment::Start),
+        hdr_btn(size_label, Length::Fixed(130.0), Message::SortGroup),
+        hdr_lbl(fl!("symbols"), Length::Fixed(80.0), Alignment::End),
     ];
 
     let q = model.search_query.to_lowercase();
@@ -185,10 +229,10 @@ pub fn files_view(model: &AppModel) -> Element<'_, Message> {
         let src = source_name(&g.name);
         let arc = archive_name(&g.name);
         let item = button(row![
-            cell(src, Length::Fill),
-            cell(arc, Length::Fixed(200.0)),
-            cell(format_size(g.total_size), Length::Fixed(140.0)),
-            cell(g.num_symbols.to_string(), Length::Fixed(90.0)),
+            cell(src, Length::Fill, Alignment::Start),
+            cell(arc, Length::Fixed(200.0), Alignment::Start),
+            num_cell(format_size(g.total_size), Length::Fixed(130.0)),
+            num_cell(g.num_symbols.to_string(), Length::Fixed(80.0)),
         ])
         .on_press(Message::DrillInto(g.name.clone()))
         .padding(0)
@@ -199,11 +243,17 @@ pub fn files_view(model: &AppModel) -> Element<'_, Message> {
 
     let body = scrollable(column(rows).spacing(0)).height(Length::Fill);
 
-    column![search, header, divider(), body]
-        .spacing(4)
-        .padding(8)
-        .height(Length::Fill)
-        .into()
+    column![
+        filter_bar(model, &fl!("search-by-source")),
+        space::horizontal().height(Length::Fixed(8.0)),
+        header,
+        divider(),
+        body
+    ]
+    .spacing(0)
+    .padding([0, 10])
+    .height(Length::Fill)
+    .into()
 }
 
 pub fn modules_view(model: &AppModel) -> Element<'_, Message> {
@@ -211,17 +261,12 @@ pub fn modules_view(model: &AppModel) -> Element<'_, Message> {
         return empty_view(model);
     }
 
-    let search = text_input(&fl!("search-by-module"), &model.search_query)
-        .on_input(Message::SearchChanged)
-        .width(Length::Fill)
-        .padding(8);
-
     let size_label = mk_label(&fl!("column-size"), sort_indicator(model));
 
     let header = row![
-        hdr_lbl(fl!("column-archive"), Length::Fill),
-        hdr_btn(size_label, Length::Fixed(140.0), Message::SortGroup),
-        hdr_lbl(fl!("symbols"), Length::Fixed(90.0)),
+        space::horizontal(),
+        hdr_btn(size_label, Length::Fixed(130.0), Message::SortGroup),
+        hdr_lbl(fl!("symbols"), Length::Fixed(80.0), Alignment::End),
     ];
 
     let q = model.search_query.to_lowercase();
@@ -239,9 +284,9 @@ pub fn modules_view(model: &AppModel) -> Element<'_, Message> {
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| g.name.clone());
         let item = button(row![
-            cell(display_name, Length::Fill),
-            cell(format_size(g.total_size), Length::Fixed(140.0)),
-            cell(g.num_symbols.to_string(), Length::Fixed(90.0)),
+            cell(display_name, Length::Fill, Alignment::Start),
+            num_cell(format_size(g.total_size), Length::Fixed(130.0)),
+            num_cell(g.num_symbols.to_string(), Length::Fixed(80.0)),
         ])
         .on_press(Message::DrillInto(g.name.clone()))
         .padding(0)
@@ -252,11 +297,17 @@ pub fn modules_view(model: &AppModel) -> Element<'_, Message> {
 
     let body = scrollable(column(rows).spacing(0)).height(Length::Fill);
 
-    column![search, header, divider(), body]
-        .spacing(4)
-        .padding(8)
-        .height(Length::Fill)
-        .into()
+    column![
+        filter_bar(model, &fl!("search-by-module")),
+        space::horizontal().height(Length::Fixed(8.0)),
+        header,
+        divider(),
+        body
+    ]
+    .spacing(0)
+    .padding([0, 10])
+    .height(Length::Fill)
+    .into()
 }
 
 pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
@@ -265,9 +316,9 @@ pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
     }
 
     let header = row![
-        hdr_lbl(fl!("column-section"), Length::Fill),
-        hdr_lbl(fl!("column-size"), Length::Fixed(140.0)),
-        hdr_lbl(fl!("symbols"), Length::Fixed(90.0)),
+        space::horizontal(),
+        hdr_lbl(fl!("column-size"), Length::Fixed(130.0), Alignment::End),
+        hdr_lbl(fl!("symbols"), Length::Fixed(80.0), Alignment::End),
     ];
 
     let mut rows: Vec<Element<'_, Message>> =
@@ -282,18 +333,15 @@ pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
                 text(format!("{arrow}  {}", g.name))
                     .size(14)
                     .width(Length::Fill),
-                text(format_size(g.total_size))
-                    .size(14)
-                    .width(Length::Fixed(140.0)),
-                text(g.num_symbols.to_string())
-                    .size(14)
-                    .width(Length::Fixed(90.0)),
+                num_cell(format_size(g.total_size), Length::Fixed(130.0)),
+                num_cell(g.num_symbols.to_string(), Length::Fixed(80.0)),
             ]
-            .padding([4, 8]),
+            .padding(0),
         )
         .on_press(Message::ToggleSection(g.name.clone()))
         .width(Length::Fill)
-        .style(button::text);
+        .style(button::text)
+        .padding(0);
         rows.push(cat_row.into());
 
         if is_open {
@@ -302,9 +350,9 @@ pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
                 if matches_category(&g.name, &sg.name) {
                     sub_rows.push(
                         row![
-                            cell(format!("    {}", sg.name), Length::Fill),
-                            cell(format_size(sg.total_size), Length::Fixed(140.0)),
-                            cell(sg.num_symbols.to_string(), Length::Fixed(90.0)),
+                            cell(format!("    {}", sg.name), Length::Fill, Alignment::Start),
+                            num_cell(format_size(sg.total_size), Length::Fixed(130.0)),
+                            num_cell(sg.num_symbols.to_string(), Length::Fixed(80.0)),
                         ]
                         .into(),
                     );
@@ -320,7 +368,7 @@ pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
 
     column![header, divider(), body]
         .spacing(0)
-        .padding(8)
+        .padding([0, 10])
         .height(Length::Fill)
         .into()
 }
@@ -340,7 +388,7 @@ pub fn symbols_view(model: &AppModel) -> Element<'_, Message> {
         return empty_view(model);
     }
 
-    let mut content = column![].spacing(4);
+    let mut content = column![].spacing(0);
 
     if let Some(ref group) = model.drilldown_group {
         let short_name = PathBuf::from(group)
@@ -350,31 +398,27 @@ pub fn symbols_view(model: &AppModel) -> Element<'_, Message> {
         content = content.push(
             button(
                 row![
-                    text("\u{2190}").size(14),
+                    text("\u{2190}").size(13),
                     text(format!("{} ({})", fl!("label-back-to-files"), short_name)).size(14)
                 ]
                 .align_y(Alignment::Center)
-                .spacing(6),
+                .spacing(5),
             )
             .on_press(Message::DrillOut)
             .style(button::text)
             .padding([4, 0]),
         );
+        content = content.push(space::horizontal().height(Length::Fixed(6.0)));
     }
 
-    let search = text_input(&fl!("search-placeholder"), &model.search_query)
-        .on_input(Message::SearchChanged)
-        .width(Length::Fill)
-        .padding(8);
-    content = content.push(search);
+    content = content.push(filter_bar(model, &fl!("search-placeholder")));
+    content = content.push(space::horizontal().height(Length::Fixed(8.0)));
 
     let hsz = mk_label(&fl!("column-size"), sort_indicator(model));
 
     let header = row![
-        hdr_lbl(fl!("column-name"), Length::Fill),
-        hdr_lbl(fl!("column-address"), Length::Fixed(160.0)),
-        hdr_btn(hsz, Length::Fixed(120.0), Message::SortBy(SortColumn::Size)),
-        hdr_lbl(fl!("column-percentage"), Length::Fixed(90.0)),
+        space::horizontal(),
+        hdr_btn(hsz, Length::Fixed(110.0), Message::SortBy(SortColumn::Size)),
     ];
     content = content.push(header);
 
@@ -389,10 +433,14 @@ pub fn symbols_view(model: &AppModel) -> Element<'_, Message> {
         };
         rows.push(
             row![
-                cell(entry.name.clone(), Length::Fill),
-                cell(format!("0x{:08X}", entry.address), Length::Fixed(160.0)),
-                cell(format_size(entry.size), Length::Fixed(120.0)),
-                cell(format!("{pct:.2}%"), Length::Fixed(90.0)),
+                cell(entry.name.clone(), Length::Fill, Alignment::Start),
+                cell(
+                    format!("0x{:08X}", entry.address),
+                    Length::Fixed(150.0),
+                    Alignment::End,
+                ),
+                num_cell(format_size(entry.size), Length::Fixed(110.0)),
+                num_cell(format!("{pct:.2}%"), Length::Fixed(80.0)),
             ]
             .into(),
         );
@@ -405,9 +453,10 @@ pub fn symbols_view(model: &AppModel) -> Element<'_, Message> {
             .height(Length::Fill)
             .into()
     };
+    content = content.push(divider());
     content = content.push(body);
 
-    content.padding(8).height(Length::Fill).into()
+    content.padding([0, 10]).height(Length::Fill).into()
 }
 
 pub fn summary_view(model: &AppModel) -> Element<'_, Message> {
@@ -446,17 +495,17 @@ pub fn summary_view(model: &AppModel) -> Element<'_, Message> {
     let rows: Vec<Element<'_, Message>> = items
         .into_iter()
         .map(|(l, v)| {
-            row![text(l).width(Length::Fixed(160.0)), text(v)]
+            row![text(l).width(Length::Fixed(180.0)), text(v).size(13)]
                 .padding([4, 0])
                 .into()
         })
         .collect();
 
-    let section_title = container(text(fl!("summary")).size(20)).padding([0, 8]);
+    let section_title = container(text(fl!("summary")).size(20)).padding([0, 10]);
 
-    column![file_info, section_title, column(rows).spacing(8)]
-        .spacing(16)
-        .padding(8)
+    column![file_info, section_title, column(rows).spacing(10)]
+        .spacing(20)
+        .padding([0, 10])
         .height(Length::Fill)
         .into()
 }
@@ -464,18 +513,20 @@ pub fn summary_view(model: &AppModel) -> Element<'_, Message> {
 pub fn empty_view(model: &AppModel) -> Element<'_, Message> {
     let msg: Element<'_, Message> = if let Some(err) = &model.error {
         column![
+            text("\u{26A0}").size(48),
             text(fl!("error-loading")).size(24),
-            text(err.clone()).size(16),
+            text(err.clone()).size(14),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_x(Alignment::Center)
         .into()
     } else {
         column![
+            text("\u{1F4E6}").size(64),
             text(fl!("no-file-loaded")).size(24),
-            text(fl!("open-instruction")).size(16),
+            text(fl!("open-instruction")).size(15),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_x(Alignment::Center)
         .into()
     };
@@ -485,6 +536,7 @@ pub fn empty_view(model: &AppModel) -> Element<'_, Message> {
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill)
+        .padding(32)
         .into()
 }
 

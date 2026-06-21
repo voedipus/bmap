@@ -83,7 +83,10 @@ impl AppModel {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Dark
+        match dark_light::detect() {
+            Ok(dark_light::Mode::Light) => Theme::Light,
+            _ => Theme::Dark,
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {

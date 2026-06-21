@@ -3,7 +3,7 @@ use crate::fl;
 use crate::model::*;
 
 use iced::widget::{button, checkbox, column, container, row, scrollable, space, text, text_input};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Theme};
 use std::path::PathBuf;
 
 pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
@@ -56,8 +56,14 @@ pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
         .spacing(8)
         .padding([6, 10]),
     )
-    .style(|_theme| container::Style {
-        background: Some(iced::Color::from_rgba(0.08, 0.08, 0.08, 1.0).into()),
+    .style(|theme| container::Style {
+        background: Some(
+            match theme {
+                Theme::Light => iced::Color::from_rgba(0.88, 0.88, 0.92, 1.0),
+                _ => iced::Color::from_rgba(0.08, 0.08, 0.08, 1.0),
+            }
+            .into(),
+        ),
         ..container::Style::default()
     })
     .width(Length::Fill)
@@ -102,8 +108,14 @@ fn divider() -> Element<'static, Message> {
     container(space::horizontal())
         .height(Length::Fixed(1.0))
         .width(Length::Fill)
-        .style(|_theme| container::Style {
-            background: Some(iced::Color::from_rgba(0.22, 0.22, 0.28, 1.0).into()),
+        .style(|theme| container::Style {
+            background: Some(
+                match theme {
+                    Theme::Light => iced::Color::from_rgba(0.78, 0.78, 0.84, 1.0),
+                    _ => iced::Color::from_rgba(0.22, 0.22, 0.28, 1.0),
+                }
+                .into(),
+            ),
             ..Default::default()
         })
         .into()

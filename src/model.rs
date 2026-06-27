@@ -1,7 +1,10 @@
+//! Domain types and pure functions for parsing and grouping MAP file entries.
+
 use mapfile_parser::MapFile;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
+/// A single symbol extracted from a MAP file.
 pub struct MapEntry {
     pub name: String,
     pub address: u64,
@@ -11,6 +14,7 @@ pub struct MapEntry {
 }
 
 #[derive(Debug, Clone)]
+/// Aggregated size and count for a group of symbols.
 pub struct GroupSummary {
     pub name: String,
     pub total_size: u64,
@@ -18,11 +22,13 @@ pub struct GroupSummary {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Columns by which symbol tables can be sorted.
 pub enum SortColumn {
     Size,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Broad ELF-style section categories used for grouping and summaries.
 pub enum SectionCategory {
     Text,
     Data,
@@ -58,6 +64,7 @@ impl SectionCategory {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Aggregated statistics for the whole loaded file.
 pub struct FileSummary {
     pub total_size: u64,
     pub text_size: u64,
@@ -91,7 +98,8 @@ pub fn build_symbol_entries(map: &MapFile) -> Vec<MapEntry> {
     entries
 }
 
-fn is_system_library(path: &PathBuf) -> bool {
+/// True if the path belongs to a standard system/runtime library.
+fn is_system_library(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.contains("libm.a")
         || s.contains("libgcc")
@@ -106,6 +114,7 @@ fn is_system_library(path: &PathBuf) -> bool {
         || s.contains("crtn")
 }
 
+/// Groups entries by an extracted string key and computes per-group totals.
 fn group_by(entries: &[MapEntry], key_fn: fn(&MapEntry) -> String) -> Vec<GroupSummary> {
     use std::collections::BTreeMap;
     let mut groups: BTreeMap<String, GroupSummary> = BTreeMap::new();
@@ -120,7 +129,7 @@ fn group_by(entries: &[MapEntry], key_fn: fn(&MapEntry) -> String) -> Vec<GroupS
         g.num_symbols += 1;
     }
     let mut result: Vec<GroupSummary> = groups.into_values().collect();
-    result.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+    result.sort_by_key(|b| std::cmp::Reverse(b.total_size));
     result
 }
 
@@ -159,7 +168,7 @@ pub fn group_section_categories(entries: &[MapEntry]) -> Vec<GroupSummary> {
         g.num_symbols += 1;
     }
     let mut result: Vec<GroupSummary> = groups.into_values().collect();
-    result.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+    result.sort_by_key(|b| std::cmp::Reverse(b.total_size));
     result
 }
 
@@ -190,6 +199,7 @@ pub fn compute_file_summary(entries: &[MapEntry]) -> FileSummary {
     s
 }
 
+/// Filters entries by name, path, or section type using a case-insensitive query.
 pub fn filter_entries(entries: &[MapEntry], query: &str) -> Vec<MapEntry> {
     if query.is_empty() {
         return entries.to_vec();
@@ -206,6 +216,7 @@ pub fn filter_entries(entries: &[MapEntry], query: &str) -> Vec<MapEntry> {
         .collect()
 }
 
+/// Sorts entries by the given column and direction.
 pub fn sort_entries(entries: &mut [MapEntry], col: SortColumn, ascending: bool) {
     entries.sort_by(|a, b| {
         let ord = match col {
@@ -215,6 +226,7 @@ pub fn sort_entries(entries: &mut [MapEntry], col: SortColumn, ascending: bool) 
     });
 }
 
+/// Sorts group summaries by total size in the given direction.
 pub fn sort_groups(groups: &mut [GroupSummary], ascending: bool) {
     groups.sort_by(|a, b| {
         let ord = a.total_size.cmp(&b.total_size);
@@ -222,6 +234,7 @@ pub fn sort_groups(groups: &mut [GroupSummary], ascending: bool) {
     });
 }
 
+/// Removes debug and toolchain metadata sections from the entry list.
 pub fn filter_debug_entries(entries: &[MapEntry]) -> Vec<MapEntry> {
     entries
         .iter()
@@ -230,6 +243,7 @@ pub fn filter_debug_entries(entries: &[MapEntry]) -> Vec<MapEntry> {
         .collect()
 }
 
+/// True for sections that contain debug info or toolchain metadata.
 fn is_debug_section(section: &str) -> bool {
     section.starts_with(".debug_")
         || section == ".comment"

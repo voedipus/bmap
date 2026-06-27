@@ -1,3 +1,5 @@
+//! Application state, messages, and the Elm-style update/view loop.
+
 use crate::fl;
 use crate::model::*;
 
@@ -37,13 +39,14 @@ pub struct AppModel {
 }
 
 #[derive(Debug, Clone)]
+/// User actions and async results handled by the application update loop.
 pub enum Message {
     OpenFile,
     FileLoaded(PathBuf, String),
     FileError(String),
     SearchChanged(String),
     SortBy(SortColumn),
-    SortGroup,
+    ToggleGroupSort,
     SelectPage(Page),
     ToggleDebug(bool),
     DrillInto(String),
@@ -140,7 +143,7 @@ impl AppModel {
                     self.sort_ascending = false;
                 }
             }
-            Message::SortGroup => {
+            Message::ToggleGroupSort => {
                 self.sort_ascending = !self.sort_ascending;
                 sort_groups(&mut self.module_groups, self.sort_ascending);
                 sort_groups(&mut self.archive_groups, self.sort_ascending);
@@ -176,20 +179,8 @@ impl AppModel {
 
     pub fn view(&self) -> Element<'_, Message> {
         let content: Element<_> = match self.current_page {
-            Page::Files => {
-                if self.drilldown_group.is_some() {
-                    crate::views::symbols_view(self)
-                } else {
-                    crate::views::files_view(self)
-                }
-            }
-            Page::Modules => {
-                if self.drilldown_group.is_some() {
-                    crate::views::symbols_view(self)
-                } else {
-                    crate::views::modules_view(self)
-                }
-            }
+            Page::Files => self.group_or_symbols_view(),
+            Page::Modules => self.group_or_symbols_view(),
             Page::Sections => crate::views::sections_view(self),
             Page::Summary => crate::views::summary_view(self),
         };
@@ -200,7 +191,19 @@ impl AppModel {
             .into()
     }
 
-    pub fn base_entries(&self) -> Vec<MapEntry> {
+    /// Shows either the group list or the symbol drill-down for pages that support drill-down.
+    fn group_or_symbols_view(&self) -> Element<'_, Message> {
+        if self.drilldown_group.is_some() {
+            crate::views::symbols_view(self)
+        } else if self.current_page == Page::Files {
+            crate::views::source_files_view(self)
+        } else {
+            crate::views::modules_view(self)
+        }
+    }
+
+    /// Returns the entries currently visible, respecting the debug-symbol toggle.
+    pub fn visible_entries(&self) -> Vec<MapEntry> {
         if self.show_debug {
             self.all_entries.clone()
         } else {
@@ -209,7 +212,7 @@ impl AppModel {
     }
 
     fn recompute_groups(&mut self) {
-        let entries = self.base_entries();
+        let entries = self.visible_entries();
         self.module_groups = group_by_module(&entries);
         self.archive_groups = group_by_archive(&entries);
         self.section_groups = group_by_section(&entries);
@@ -218,6 +221,7 @@ impl AppModel {
     }
 }
 
+/// Top-level pages shown in the toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Files,

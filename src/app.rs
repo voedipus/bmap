@@ -1,214 +1,129 @@
-//! Application state, messages, and the Elm-style update/view loop.
+//! Application state and the root GPUI entity.
 
-use crate::fl;
+use crate::i18n::{t, Language};
 use crate::model::*;
+use crate::theme;
+use crate::ui::input::{InputEvent, SearchInput};
+use crate::ui::pages;
+use crate::ui::toolbar;
 
-use iced::{Element, Length, Task, Theme};
+use gpui::prelude::*;
+use gpui::*;
 use mapfile_parser::MapFile;
 use std::path::PathBuf;
 
-pub fn format_size(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-pub struct AppModel {
+pub struct BmapApp {
     pub current_page: Page,
-
+    pub language: Language,
+    pub file_path: Option<PathBuf>,
+    pub error: Option<String>,
     pub all_entries: Vec<MapEntry>,
     pub module_groups: Vec<GroupSummary>,
     pub archive_groups: Vec<GroupSummary>,
     pub section_groups: Vec<GroupSummary>,
     pub section_categories: Vec<GroupSummary>,
     pub summary: FileSummary,
-    pub file_path: Option<PathBuf>,
-    pub error: Option<String>,
-
-    pub search_query: String,
-    pub sort_column: SortColumn,
-    pub sort_ascending: bool,
+    pub search_query: SharedString,
     pub show_debug: bool,
-
-    pub drilldown_group: Option<String>,
-    pub expanded_section: Option<String>,
+    pub sort_ascending: bool,
+    pub drilldown_group: Option<SharedString>,
+    pub expanded_section: Option<SharedString>,
+    pub search_input: Entity<SearchInput>,
+    _search_subscription: Subscription,
 }
 
-#[derive(Debug, Clone)]
-/// User actions and async results handled by the application update loop.
-pub enum Message {
-    OpenFile,
-    FileLoaded(PathBuf, String),
-    FileError(String),
-    SearchChanged(String),
-    SortBy(SortColumn),
-    ToggleGroupSort,
-    SelectPage(Page),
-    ToggleDebug(bool),
-    DrillInto(String),
-    DrillOut,
-    ToggleSection(String),
+/// Top-level pages shown in the toolbar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Files,
+    Modules,
+    Sections,
+    Summary,
 }
 
-impl AppModel {
-    pub fn new() -> (Self, Task<Message>) {
-        let app = AppModel {
+impl BmapApp {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let language = Language::detect();
+        let placeholder = t("search-placeholder", language);
+        let search_input = cx.new(|cx| SearchInput::new(placeholder, cx));
+        let subscription = cx.subscribe(&search_input, |this, _input, event, cx| {
+            let InputEvent::Changed(text) = event;
+            this.search_query = text.clone();
+            cx.notify();
+        });
+
+        Self {
             current_page: Page::Files,
+            language,
+            file_path: None,
+            error: None,
             all_entries: Vec::new(),
             module_groups: Vec::new(),
             archive_groups: Vec::new(),
             section_groups: Vec::new(),
             section_categories: Vec::new(),
             summary: FileSummary::default(),
-            file_path: None,
-            error: None,
-            search_query: String::new(),
-            sort_column: SortColumn::Size,
-            sort_ascending: false,
+            search_query: "".into(),
             show_debug: false,
+            sort_ascending: false,
             drilldown_group: None,
             expanded_section: None,
-        };
-        (app, Task::none())
-    }
-
-    pub fn title(&self) -> String {
-        let mut title = fl!("app-title");
-        if let Some(p) = &self.file_path {
-            title.push_str(" — ");
-            title.push_str(&p.file_name().unwrap_or_default().to_string_lossy());
-        }
-        title
-    }
-
-    pub fn theme(&self) -> Theme {
-        match dark_light::detect() {
-            Ok(dark_light::Mode::Light) => Theme::Light,
-            _ => Theme::Dark,
+            search_input,
+            _search_subscription: subscription,
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::OpenFile => {
-                return Task::perform(
-                    async {
-                        let dialog = rfd::AsyncFileDialog::new()
-                            .set_title(&fl!("open-map-file"))
-                            .add_filter("MAP files", &["map"])
-                            .add_filter("All files", &["*"]);
-                        match dialog.pick_file().await {
-                            Some(handle) => {
-                                let path = handle.path().to_path_buf();
-                                match tokio::fs::read_to_string(&path).await {
-                                    Ok(contents) => Message::FileLoaded(path, contents),
-                                    Err(why) => Message::FileError(format!(
-                                        "failed to read {}: {why}",
-                                        path.display()
-                                    )),
-                                }
-                            }
-                            None => Message::FileError(String::new()),
-                        }
-                    },
-                    std::convert::identity,
-                );
-            }
-            Message::FileLoaded(path, contents) => {
-                self.file_path = Some(path);
-                self.error = None;
-                let map = MapFile::new_from_map_str(&contents);
-                self.all_entries = build_symbol_entries(&map);
-                self.recompute_groups();
-                self.drilldown_group = None;
-                self.expanded_section = None;
-            }
-            Message::FileError(why) => {
-                if !why.is_empty() {
-                    self.error = Some(why);
+    pub fn open_file(&mut self, cx: &mut Context<Self>) {
+        let language = self.language;
+        cx.spawn(async move |this, cx| {
+            let result = rfd::AsyncFileDialog::new()
+                .set_title(t("open-map-file", language).to_string())
+                .add_filter("MAP files", &["map"])
+                .add_filter("All files", &["*"])
+                .pick_file()
+                .await;
+            if let Some(handle) = result {
+                let path = handle.path().to_path_buf();
+                let path_for_error = path.clone();
+                let read_result = cx
+                    .background_executor()
+                    .spawn(async move { std::fs::read_to_string(&path) })
+                    .await;
+                match read_result {
+                    Ok(contents) => {
+                        this.update(cx, |app, cx| {
+                            app.load_file(path_for_error, contents, cx);
+                            cx.notify();
+                        })?;
+                    }
+                    Err(why) => {
+                        this.update(cx, |app, cx| {
+                            app.error = Some(format!(
+                                "failed to read {}: {why}",
+                                path_for_error.display()
+                            ));
+                            cx.notify();
+                        })?;
+                    }
                 }
             }
-            Message::SearchChanged(query) => {
-                self.search_query = query;
-            }
-            Message::SortBy(col) => {
-                if self.sort_column == col {
-                    self.sort_ascending = !self.sort_ascending;
-                } else {
-                    self.sort_column = col;
-                    self.sort_ascending = false;
-                }
-            }
-            Message::ToggleGroupSort => {
-                self.sort_ascending = !self.sort_ascending;
-                sort_groups(&mut self.module_groups, self.sort_ascending);
-                sort_groups(&mut self.archive_groups, self.sort_ascending);
-                sort_groups(&mut self.section_groups, self.sort_ascending);
-            }
-            Message::SelectPage(page) => {
-                self.current_page = page;
-                self.drilldown_group = None;
-                self.expanded_section = None;
-                self.search_query.clear();
-            }
-            Message::ToggleDebug(show) => {
-                self.show_debug = show;
-                self.recompute_groups();
-            }
-            Message::DrillInto(group_name) => {
-                self.drilldown_group = Some(group_name);
-            }
-            Message::DrillOut => {
-                self.drilldown_group = None;
-                self.search_query.clear();
-            }
-            Message::ToggleSection(name) => {
-                if self.expanded_section.as_deref() == Some(&name) {
-                    self.expanded_section = None;
-                } else {
-                    self.expanded_section = Some(name);
-                }
-            }
-        }
-        Task::none()
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach_and_log_err(cx);
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
-        let content: Element<_> = match self.current_page {
-            Page::Files => self.group_or_symbols_view(),
-            Page::Modules => self.group_or_symbols_view(),
-            Page::Sections => crate::views::sections_view(self),
-            Page::Summary => crate::views::summary_view(self),
-        };
-
-        iced::widget::column![crate::views::toolbar(self), content]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    }
-
-    /// Shows either the group list or the symbol drill-down for pages that support drill-down.
-    fn group_or_symbols_view(&self) -> Element<'_, Message> {
-        if self.drilldown_group.is_some() {
-            crate::views::symbols_view(self)
-        } else if self.current_page == Page::Files {
-            crate::views::source_files_view(self)
-        } else {
-            crate::views::modules_view(self)
-        }
-    }
-
-    /// Returns the entries currently visible, respecting the debug-symbol toggle.
-    pub fn visible_entries(&self) -> Vec<MapEntry> {
-        if self.show_debug {
-            self.all_entries.clone()
-        } else {
-            filter_debug_entries(&self.all_entries)
-        }
+    fn load_file(&mut self, path: PathBuf, contents: String, cx: &mut Context<Self>) {
+        self.file_path = Some(path);
+        self.error = None;
+        let map = MapFile::new_from_map_str(&contents);
+        self.all_entries = build_symbol_entries(&map);
+        self.recompute_groups();
+        self.drilldown_group = None;
+        self.expanded_section = None;
+        self.search_query = "".into();
+        self.search_input
+            .update(cx, |input, cx| input.set_text("", cx));
+        cx.notify();
     }
 
     fn recompute_groups(&mut self) {
@@ -219,13 +134,107 @@ impl AppModel {
         self.section_categories = group_section_categories(&entries);
         self.summary = compute_file_summary(&entries);
     }
+
+    pub fn visible_entries(&self) -> Vec<MapEntry> {
+        if self.show_debug {
+            self.all_entries.clone()
+        } else {
+            filter_debug_entries(&self.all_entries)
+        }
+    }
+
+    pub fn select_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.current_page = page;
+        self.drilldown_group = None;
+        self.expanded_section = None;
+        self.search_query = "".into();
+        self.search_input
+            .update(cx, |input, cx| input.set_text("", cx));
+        cx.notify();
+    }
+
+    pub fn toggle_debug(&mut self, cx: &mut Context<Self>) {
+        self.show_debug = !self.show_debug;
+        self.recompute_groups();
+        cx.notify();
+    }
+
+    pub fn toggle_group_sort(&mut self, cx: &mut Context<Self>) {
+        self.sort_ascending = !self.sort_ascending;
+        sort_groups(&mut self.module_groups, self.sort_ascending);
+        sort_groups(&mut self.archive_groups, self.sort_ascending);
+        sort_groups(&mut self.section_groups, self.sort_ascending);
+        cx.notify();
+    }
+
+    pub fn drill_into(&mut self, group: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.drilldown_group = Some(group.into());
+        self.search_query = "".into();
+        self.search_input
+            .update(cx, |input, cx| input.set_text("", cx));
+        cx.notify();
+    }
+
+    pub fn drill_out(&mut self, cx: &mut Context<Self>) {
+        self.drilldown_group = None;
+        self.search_query = "".into();
+        self.search_input
+            .update(cx, |input, cx| input.set_text("", cx));
+        cx.notify();
+    }
+
+    pub fn toggle_section(&mut self, name: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let name = name.into();
+        if self.expanded_section.as_ref() == Some(&name) {
+            self.expanded_section = None;
+        } else {
+            self.expanded_section = Some(name);
+        }
+        cx.notify();
+    }
 }
 
-/// Top-level pages shown in the toolbar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    Files,
-    Modules,
-    Sections,
-    Summary,
+impl Render for BmapApp {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(theme::BG_PRIMARY)
+            .text_color(theme::TEXT_PRIMARY)
+            .child(toolbar::render(self, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(pages::render(self, cx)),
+            )
+    }
+}
+
+pub fn run() {
+    gpui_platform::application().run(|cx| {
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: Point {
+                        x: px(100.0),
+                        y: px(100.0),
+                    },
+                    size: Size {
+                        width: px(960.0),
+                        height: px(640.0),
+                    },
+                })),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("bmap".into()),
+                    appears_transparent: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            |_window, cx| cx.new(BmapApp::new),
+        )
+        .unwrap();
+    });
 }

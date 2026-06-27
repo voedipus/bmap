@@ -3,8 +3,8 @@
 use mapfile_parser::MapFile;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
 /// A single symbol extracted from a MAP file.
+#[derive(Debug, Clone)]
 pub struct MapEntry {
     pub name: String,
     pub address: u64,
@@ -13,22 +13,16 @@ pub struct MapEntry {
     pub filepath: PathBuf,
 }
 
-#[derive(Debug, Clone)]
 /// Aggregated size and count for a group of symbols.
+#[derive(Debug, Clone)]
 pub struct GroupSummary {
     pub name: String,
     pub total_size: u64,
     pub num_symbols: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Columns by which symbol tables can be sorted.
-pub enum SortColumn {
-    Size,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Broad ELF-style section categories used for grouping and summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionCategory {
     Text,
     Data,
@@ -63,8 +57,8 @@ impl SectionCategory {
     }
 }
 
-#[derive(Debug, Clone, Default)]
 /// Aggregated statistics for the whole loaded file.
+#[derive(Debug, Clone, Default)]
 pub struct FileSummary {
     pub total_size: u64,
     pub text_size: u64,
@@ -216,13 +210,15 @@ pub fn filter_entries(entries: &[MapEntry], query: &str) -> Vec<MapEntry> {
         .collect()
 }
 
-/// Sorts entries by the given column and direction.
-pub fn sort_entries(entries: &mut [MapEntry], col: SortColumn, ascending: bool) {
+/// Sorts entries by size in the given direction.
+pub fn sort_entries(entries: &mut [MapEntry], ascending: bool) {
     entries.sort_by(|a, b| {
-        let ord = match col {
-            SortColumn::Size => a.size.cmp(&b.size),
-        };
-        if ascending { ord } else { ord.reverse() }
+        let ord = a.size.cmp(&b.size);
+        if ascending {
+            ord
+        } else {
+            ord.reverse()
+        }
     });
 }
 
@@ -230,7 +226,11 @@ pub fn sort_entries(entries: &mut [MapEntry], col: SortColumn, ascending: bool) 
 pub fn sort_groups(groups: &mut [GroupSummary], ascending: bool) {
     groups.sort_by(|a, b| {
         let ord = a.total_size.cmp(&b.total_size);
-        if ascending { ord } else { ord.reverse() }
+        if ascending {
+            ord
+        } else {
+            ord.reverse()
+        }
     });
 }
 
@@ -253,4 +253,68 @@ fn is_debug_section(section: &str) -> bool {
         || section.starts_with(".ARM.attributes")
         || section.starts_with(".ARM.exidx")
         || section.starts_with(".ARM.extab")
+}
+
+pub fn format_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Extracts the source object name from an archive path like `libfoo.a(foo.o)`.
+pub fn source_name(object_path: &str) -> String {
+    let inner = if let Some(start) = object_path.find('(') {
+        if let Some(end) = object_path.find(')') {
+            &object_path[start + 1..end]
+        } else {
+            &object_path[start + 1..]
+        }
+    } else {
+        object_path
+    };
+    PathBuf::from(inner)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Extracts the archive or file name from an object path.
+pub fn archive_name(object_path: &str) -> String {
+    if let Some(p) = object_path.find('(') {
+        let archive = &object_path[..p];
+        PathBuf::from(archive)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| archive.to_string())
+    } else {
+        PathBuf::from(object_path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| object_path.to_string())
+    }
+}
+
+/// Filters entries whose file path matches the selected group.
+///
+/// A group may be either an exact object file path or the outer archive path
+/// of an entry like `libfoo.a(foo.o)`.
+pub fn filter_by_group_path(entries: &[MapEntry], group_path: &str) -> Vec<MapEntry> {
+    entries
+        .iter()
+        .filter(|e| {
+            let entry_path = e.filepath.to_string_lossy();
+            if entry_path == group_path {
+                return true;
+            }
+            if let Some(p) = entry_path.find('(') {
+                return &entry_path[..p] == group_path;
+            }
+            false
+        })
+        .cloned()
+        .collect()
 }

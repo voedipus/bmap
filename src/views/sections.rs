@@ -6,7 +6,7 @@ use crate::model::matches_category;
 use crate::views::{cell, divider, header_label, icons, numeric_cell, widths};
 
 use iced::widget::{button, column, row, scrollable, space, text};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Font, Length};
 
 pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
     if model.section_categories.is_empty() {
@@ -33,7 +33,11 @@ pub fn sections_view(model: &AppModel) -> Element<'_, Message> {
         let cat_row = button(
             row![
                 text(format!("{arrow}  {}", category.name))
-                    .size(14)
+                    .size(15)
+                    .font(Font {
+                        weight: iced::font::Weight::Bold,
+                        ..Font::DEFAULT
+                    })
                     .width(Length::Fill),
                 numeric_cell(format_size(category.total_size), widths::SIZE),
                 numeric_cell(category.num_symbols.to_string(), widths::SYMBOLS),

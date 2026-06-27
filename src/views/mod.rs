@@ -24,11 +24,7 @@ use iced::{Alignment, Element, Length, Theme};
 
 /// Icons used in the toolbar and empty states.
 pub mod icons {
-    pub const OPEN: &str = "\u{1F4C2}";
     pub const FILES: &str = "\u{1f4e6}";
-    pub const MODULES: &str = "\u{1f4c1}";
-    pub const SECTIONS: &str = "\u{2195}";
-    pub const SUMMARY: &str = "\u{2261}";
     pub const BACK: &str = "\u{2190}";
     pub const EXPANDED: &str = "\u{25BC}";
     pub const COLLAPSED: &str = "\u{25B6}";
@@ -76,10 +72,19 @@ pub fn header_label(label: String, width: Length, align: Alignment) -> Element<'
 
 /// A generic table cell with the given alignment.
 pub fn cell(label: String, width: Length, align: Alignment) -> Element<'static, Message> {
-    container(text(label).size(14).align_x(align).width(Length::Fill))
-        .padding([5, 12])
-        .width(width)
-        .into()
+    container(
+        text(label)
+            .size(14)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..iced::Font::DEFAULT
+            })
+            .align_x(align)
+            .width(Length::Fill),
+    )
+    .padding([5, 12])
+    .width(width)
+    .into()
 }
 
 /// A table cell aligned to the end, suitable for numbers.
@@ -125,7 +130,7 @@ pub fn divider() -> Element<'static, Message> {
 pub fn toolbar_background(theme: &Theme) -> iced::Color {
     match theme {
         Theme::Light => iced::Color::from_rgba(0.92, 0.92, 0.96, 1.0),
-        _ => iced::Color::from_rgba(0.10, 0.10, 0.14, 1.0),
+        _ => iced::Color::from_rgba(0.09, 0.09, 0.13, 1.0),
     }
 }
 
@@ -133,7 +138,7 @@ pub fn toolbar_background(theme: &Theme) -> iced::Color {
 pub fn toolbar_border_color(theme: &Theme) -> iced::Color {
     match theme {
         Theme::Light => iced::Color::from_rgba(0.78, 0.78, 0.84, 1.0),
-        _ => iced::Color::from_rgba(0.16, 0.16, 0.22, 1.0),
+        _ => iced::Color::from_rgba(0.14, 0.14, 0.20, 1.0),
     }
 }
 
@@ -141,7 +146,7 @@ pub fn toolbar_border_color(theme: &Theme) -> iced::Color {
 pub fn nav_pill_background(theme: &Theme) -> iced::Color {
     match theme {
         Theme::Light => iced::Color::from_rgba(0.84, 0.84, 0.88, 1.0),
-        _ => iced::Color::from_rgba(0.12, 0.12, 0.16, 1.0),
+        _ => iced::Color::from_rgba(0.11, 0.11, 0.16, 1.0),
     }
 }
 
@@ -149,7 +154,7 @@ pub fn nav_pill_background(theme: &Theme) -> iced::Color {
 pub fn divider_color(theme: &Theme) -> iced::Color {
     match theme {
         Theme::Light => iced::Color::from_rgba(0.80, 0.80, 0.86, 1.0),
-        _ => iced::Color::from_rgba(0.20, 0.20, 0.26, 1.0),
+        _ => iced::Color::from_rgba(0.18, 0.18, 0.26, 1.0),
     }
 }
 

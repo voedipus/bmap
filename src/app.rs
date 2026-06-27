@@ -88,7 +88,17 @@ impl AppModel {
     pub fn theme(&self) -> Theme {
         match dark_light::detect() {
             Ok(dark_light::Mode::Light) => Theme::Light,
-            _ => Theme::Dark,
+            _ => Theme::custom(
+                std::borrow::Cow::Borrowed("bmap-dark"),
+                iced::theme::Palette {
+                    background: iced::Color::from_rgba(0.08, 0.08, 0.11, 1.0),
+                    text: iced::Color::from_rgba(0.88, 0.88, 0.94, 1.0),
+                    primary: iced::Color::from_rgba(0.39, 0.40, 0.95, 1.0),
+                    success: iced::Color::from_rgba(0.2, 0.8, 0.4, 1.0),
+                    warning: iced::Color::from_rgba(0.9, 0.7, 0.2, 1.0),
+                    danger: iced::Color::from_rgba(0.9, 0.3, 0.3, 1.0),
+                },
+            ),
         }
     }
 

@@ -35,7 +35,10 @@ pub fn summary_view(model: &AppModel) -> Element<'_, Message> {
         .map(|(label, value)| {
             row![
                 text(label).width(Length::Fixed(180.0)),
-                text(value).size(13)
+                text(value).size(14).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                })
             ]
             .padding([4, 0])
             .into()

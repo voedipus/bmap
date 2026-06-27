@@ -2,41 +2,42 @@
 
 use crate::app::{AppModel, Message, Page};
 use crate::fl;
-use crate::views::icons;
 use crate::views::{nav_pill_background, toolbar_background, toolbar_border_color};
 
 use iced::widget::{button, container, row, space, text};
 use iced::{Alignment, Element, Length};
 
 pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
-    let open_btn = button(
-        row![text(icons::OPEN).size(18), text(fl!("open")).size(15),]
-            .align_y(Alignment::Center)
-            .spacing(7),
-    )
-    .on_press(Message::OpenFile)
-    .padding([8, 20]);
+    let open_btn = button(text(fl!("open")).size(14))
+        .on_press(Message::OpenFile)
+        .padding([6, 18])
+        .style(|theme, status| {
+            let mut s = button::primary(theme, status);
+            s.border.radius = 14.0.into();
+            s
+        });
 
     let pages = [
-        (Page::Files, icons::FILES, fl!("files")),
-        (Page::Modules, icons::MODULES, fl!("modules")),
-        (Page::Sections, icons::SECTIONS, fl!("sections")),
-        (Page::Summary, icons::SUMMARY, fl!("summary")),
+        (Page::Files, fl!("files")),
+        (Page::Modules, fl!("modules")),
+        (Page::Sections, fl!("sections")),
+        (Page::Summary, fl!("summary")),
     ];
 
     let nav_buttons: Vec<Element<'_, Message>> = pages
         .into_iter()
-        .map(|(page, icon, label)| {
+        .map(|(page, label)| {
             let is_active = model.current_page == page;
-            let mut btn = button(
-                row![text(icon).size(14), text(label).size(13)]
-                    .align_y(Alignment::Center)
-                    .spacing(4)
-                    .padding([4, 10]),
-            );
-            if !is_active {
-                btn = btn.style(button::secondary);
-            }
+            let mut btn = button(text(label).size(13));
+            btn = btn.padding([5, 14]).style(move |theme, status| {
+                let mut s = if is_active {
+                    button::primary(theme, status)
+                } else {
+                    button::secondary(theme, status)
+                };
+                s.border.radius = 12.0.into();
+                s
+            });
             btn.on_press(Message::SelectPage(page)).into()
         })
         .collect();
@@ -46,7 +47,7 @@ pub fn toolbar(model: &AppModel) -> Element<'_, Message> {
         .style(|theme| container::Style {
             background: Some(nav_pill_background(theme).into()),
             border: iced::Border {
-                radius: 8.0.into(),
+                radius: 16.0.into(),
                 ..Default::default()
             },
             ..container::Style::default()

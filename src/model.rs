@@ -1,9 +1,13 @@
 //! Domain types and pure functions for parsing and grouping MAP file entries.
 
 use mapfile_parser::MapFile;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// A single symbol extracted from a MAP file.
+///
+/// The `path_str` field is the pre-computed `filepath.to_string_lossy()` to
+/// avoid repeated allocations in hot filter paths.
 #[derive(Debug, Clone)]
 pub struct MapEntry {
     pub name: String,
@@ -11,6 +15,7 @@ pub struct MapEntry {
     pub size: u64,
     pub section_type: String,
     pub filepath: PathBuf,
+    pub path_str: String,
 }
 
 /// Aggregated size and count for a group of symbols.
@@ -19,6 +24,13 @@ pub struct GroupSummary {
     pub name: String,
     pub total_size: u64,
     pub num_symbols: usize,
+}
+
+impl GroupSummary {
+    fn add(&mut self, size: u64) {
+        self.total_size += size;
+        self.num_symbols += 1;
+    }
 }
 
 /// Broad ELF-style section categories used for grouping and summaries.
@@ -71,6 +83,126 @@ pub struct FileSummary {
     pub num_sections: usize,
 }
 
+/// Pre-computed groups and summary from a single pass over entries.
+#[derive(Debug, Clone, Default)]
+pub struct Aggregate {
+    pub module_groups: Vec<GroupSummary>,
+    pub archive_groups: Vec<GroupSummary>,
+    pub section_groups: Vec<GroupSummary>,
+    pub section_categories: Vec<GroupSummary>,
+    pub summary: FileSummary,
+}
+
+/// Compute all groups and the summary in ONE pass over entries.
+pub fn aggregate(entries: &[MapEntry], show_debug: bool) -> Aggregate {
+    let mut modules: BTreeMap<String, GroupSummary> = BTreeMap::new();
+    let mut archives: BTreeMap<String, GroupSummary> = BTreeMap::new();
+    let mut sections: BTreeMap<String, GroupSummary> = BTreeMap::new();
+    let mut categories: BTreeMap<String, GroupSummary> = BTreeMap::new();
+    let mut files = BTreeSet::new();
+    let mut section_names = BTreeSet::new();
+    let mut total_size = 0u64;
+    let mut text_size = 0u64;
+    let mut data_size = 0u64;
+    let mut rodata_size = 0u64;
+    let mut bss_size = 0u64;
+    let mut other_size = 0u64;
+    let mut num_symbols = 0usize;
+
+    for e in entries {
+        if !show_debug && is_debug_section(&e.section_type) {
+            continue;
+        }
+
+        let size = e.size;
+        num_symbols += 1;
+        total_size += size;
+
+        let cat = SectionCategory::classify(&e.section_type);
+        match cat {
+            SectionCategory::Text => text_size += size,
+            SectionCategory::Data => data_size += size,
+            SectionCategory::Rodata => rodata_size += size,
+            SectionCategory::Bss => bss_size += size,
+            SectionCategory::Other => other_size += size,
+        }
+
+        let path = &e.path_str;
+
+        // Module key
+        modules
+            .entry(path.clone())
+            .or_insert_with(|| GroupSummary {
+                name: path.clone(),
+                total_size: 0,
+                num_symbols: 0,
+            })
+            .add(size);
+
+        // Archive key
+        let archive_key = if let Some(p) = path.find('(') {
+            path[..p].to_string()
+        } else {
+            path.clone()
+        };
+        archives
+            .entry(archive_key.clone())
+            .or_insert_with(|| GroupSummary {
+                name: archive_key,
+                total_size: 0,
+                num_symbols: 0,
+            })
+            .add(size);
+
+        // Section key
+        sections
+            .entry(e.section_type.clone())
+            .or_insert_with(|| GroupSummary {
+                name: e.section_type.clone(),
+                total_size: 0,
+                num_symbols: 0,
+            })
+            .add(size);
+
+        // Category key
+        let cat_name = cat.name().to_string();
+        categories
+            .entry(cat_name.clone())
+            .or_insert_with(|| GroupSummary {
+                name: cat_name,
+                total_size: 0,
+                num_symbols: 0,
+            })
+            .add(size);
+
+        files.insert(path.clone());
+        section_names.insert(e.section_type.clone());
+    }
+
+    fn sort_groups(mut g: Vec<GroupSummary>) -> Vec<GroupSummary> {
+        g.sort_by_key(|b| std::cmp::Reverse(b.total_size));
+        g
+    }
+
+    Aggregate {
+        module_groups: sort_groups(modules.into_values().collect()),
+        archive_groups: sort_groups(archives.into_values().collect()),
+        section_groups: sort_groups(sections.into_values().collect()),
+        section_categories: sort_groups(categories.into_values().collect()),
+        summary: FileSummary {
+            total_size,
+            text_size,
+            data_size,
+            rodata_size,
+            bss_size,
+            other_size,
+            num_symbols,
+            num_files: files.len(),
+            num_sections: section_names.len(),
+        },
+    }
+}
+
 pub fn build_symbol_entries(map: &MapFile) -> Vec<MapEntry> {
     let mut entries = Vec::new();
     for segment in &map.segments_list {
@@ -84,6 +216,7 @@ pub fn build_symbol_entries(map: &MapFile) -> Vec<MapEntry> {
                     address: sym.vram,
                     size: sym.size,
                     section_type: section.section_type.clone(),
+                    path_str: section.filepath.to_string_lossy().into_owned(),
                     filepath: section.filepath.clone(),
                 });
             }
@@ -108,143 +241,36 @@ fn is_system_library(path: &Path) -> bool {
         || s.contains("crtn")
 }
 
-/// Groups entries by an extracted string key and computes per-group totals.
-fn group_by(entries: &[MapEntry], key_fn: fn(&MapEntry) -> String) -> Vec<GroupSummary> {
-    use std::collections::BTreeMap;
-    let mut groups: BTreeMap<String, GroupSummary> = BTreeMap::new();
-    for e in entries {
-        let key = key_fn(e);
-        let g = groups.entry(key.clone()).or_insert(GroupSummary {
-            name: key,
-            total_size: 0,
-            num_symbols: 0,
-        });
-        g.total_size += e.size;
-        g.num_symbols += 1;
-    }
-    let mut result: Vec<GroupSummary> = groups.into_values().collect();
-    result.sort_by_key(|b| std::cmp::Reverse(b.total_size));
-    result
-}
-
-pub fn group_by_module(entries: &[MapEntry]) -> Vec<GroupSummary> {
-    group_by(entries, |e| e.filepath.to_string_lossy().to_string())
-}
-
-pub fn group_by_archive(entries: &[MapEntry]) -> Vec<GroupSummary> {
-    group_by(entries, |e| {
-        let path = e.filepath.to_string_lossy().to_string();
-        if let Some(p) = path.find('(') {
-            path[..p].to_string()
-        } else {
-            path
-        }
-    })
-}
-
-pub fn group_by_section(entries: &[MapEntry]) -> Vec<GroupSummary> {
-    group_by(entries, |e| e.section_type.clone())
-}
-
-pub fn group_section_categories(entries: &[MapEntry]) -> Vec<GroupSummary> {
-    use std::collections::BTreeMap;
-    let mut groups: BTreeMap<String, GroupSummary> = BTreeMap::new();
-    for e in entries {
-        let cat = SectionCategory::classify(&e.section_type)
-            .name()
-            .to_string();
-        let g = groups.entry(cat.clone()).or_insert(GroupSummary {
-            name: cat,
-            total_size: 0,
-            num_symbols: 0,
-        });
-        g.total_size += e.size;
-        g.num_symbols += 1;
-    }
-    let mut result: Vec<GroupSummary> = groups.into_values().collect();
-    result.sort_by_key(|b| std::cmp::Reverse(b.total_size));
-    result
-}
-
 pub fn matches_category(category: &str, section: &str) -> bool {
     SectionCategory::classify(section).name() == category
 }
 
-pub fn compute_file_summary(entries: &[MapEntry]) -> FileSummary {
-    let mut s = FileSummary::default();
-    use std::collections::BTreeSet;
-    let mut files = BTreeSet::new();
-    let mut sections = BTreeSet::new();
-    for e in entries {
-        s.total_size += e.size;
-        s.num_symbols += 1;
-        files.insert(e.filepath.to_string_lossy().to_string());
-        sections.insert(e.section_type.clone());
-        match SectionCategory::classify(&e.section_type) {
-            SectionCategory::Text => s.text_size += e.size,
-            SectionCategory::Data => s.data_size += e.size,
-            SectionCategory::Rodata => s.rodata_size += e.size,
-            SectionCategory::Bss => s.bss_size += e.size,
-            SectionCategory::Other => s.other_size += e.size,
-        }
-    }
-    s.num_files = files.len();
-    s.num_sections = sections.len();
-    s
-}
+// ─── Drill-down helpers ───────────────────────────────────────
 
-/// Filters entries by name, path, or section type using a case-insensitive query.
-pub fn filter_entries(entries: &[MapEntry], query: &str) -> Vec<MapEntry> {
-    if query.is_empty() {
-        return entries.to_vec();
-    }
-    let q = query.to_lowercase();
+/// Return entry indices matching a group path, respecting the debug filter.
+pub fn drill_indices(entries: &[MapEntry], group_path: &str, show_debug: bool) -> Vec<usize> {
     entries
         .iter()
-        .filter(|e| {
-            e.name.to_lowercase().contains(&q)
-                || e.filepath.to_string_lossy().to_lowercase().contains(&q)
-                || e.section_type.to_lowercase().contains(&q)
+        .enumerate()
+        .filter(|(_, e)| {
+            if !show_debug && is_debug_section(&e.section_type) {
+                return false;
+            }
+            let p = &e.path_str;
+            if p == group_path {
+                return true;
+            }
+            if let Some(pos) = p.find('(') {
+                return &p[..pos] == group_path;
+            }
+            false
         })
-        .cloned()
-        .collect()
-}
-
-/// Sorts entries by size in the given direction.
-pub fn sort_entries(entries: &mut [MapEntry], ascending: bool) {
-    entries.sort_by(|a, b| {
-        let ord = a.size.cmp(&b.size);
-        if ascending {
-            ord
-        } else {
-            ord.reverse()
-        }
-    });
-}
-
-/// Sorts group summaries by total size in the given direction.
-pub fn sort_groups(groups: &mut [GroupSummary], ascending: bool) {
-    groups.sort_by(|a, b| {
-        let ord = a.total_size.cmp(&b.total_size);
-        if ascending {
-            ord
-        } else {
-            ord.reverse()
-        }
-    });
-}
-
-/// Removes debug and toolchain metadata sections from the entry list.
-pub fn filter_debug_entries(entries: &[MapEntry]) -> Vec<MapEntry> {
-    entries
-        .iter()
-        .filter(|e| !is_debug_section(&e.section_type))
-        .cloned()
+        .map(|(i, _)| i)
         .collect()
 }
 
 /// True for sections that contain debug info or toolchain metadata.
-fn is_debug_section(section: &str) -> bool {
+pub fn is_debug_section(section: &str) -> bool {
     section.starts_with(".debug_")
         || section == ".comment"
         || section.starts_with(".note")
@@ -296,25 +322,4 @@ pub fn archive_name(object_path: &str) -> String {
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| object_path.to_string())
     }
-}
-
-/// Filters entries whose file path matches the selected group.
-///
-/// A group may be either an exact object file path or the outer archive path
-/// of an entry like `libfoo.a(foo.o)`.
-pub fn filter_by_group_path(entries: &[MapEntry], group_path: &str) -> Vec<MapEntry> {
-    entries
-        .iter()
-        .filter(|e| {
-            let entry_path = e.filepath.to_string_lossy();
-            if entry_path == group_path {
-                return true;
-            }
-            if let Some(p) = entry_path.find('(') {
-                return &entry_path[..p] == group_path;
-            }
-            false
-        })
-        .cloned()
-        .collect()
 }

@@ -9,10 +9,10 @@ repository = "https://github.com/bmap"
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["x11", "wayland"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
 anyhow = "1.0"
 mapfile_parser = { version = "2.12", features = ["serde"] }
 rfd = "0.17"
-tokio = { version = "1", features = ["fs", "rt-multi-thread"] }
 sys-locale = "0.3"
 
 [profile.release]

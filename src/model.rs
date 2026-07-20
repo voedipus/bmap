@@ -6,15 +6,13 @@ use std::path::{Path, PathBuf};
 
 /// A single symbol extracted from a MAP file.
 ///
-/// The `path_str` field is the pre-computed `filepath.to_string_lossy()` to
-/// avoid repeated allocations in hot filter paths.
+/// `path_str` is the pre-computed `filepath.to_string_lossy()`.
 #[derive(Debug, Clone)]
 pub struct MapEntry {
     pub name: String,
     pub address: u64,
     pub size: u64,
     pub section_type: String,
-    pub filepath: PathBuf,
     pub path_str: String,
 }
 
@@ -217,7 +215,6 @@ pub fn build_symbol_entries(map: &MapFile) -> Vec<MapEntry> {
                     size: sym.size,
                     section_type: section.section_type.clone(),
                     path_str: section.filepath.to_string_lossy().into_owned(),
-                    filepath: section.filepath.clone(),
                 });
             }
         }

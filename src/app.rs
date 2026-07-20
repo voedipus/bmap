@@ -34,7 +34,6 @@ pub struct BmapApp {
     pub expanded_section: Option<String>,
     pub search_input: Entity<InputState>,
     pub search_query: String,
-    _search_subscription: Subscription,
 }
 
 impl BmapApp {
@@ -43,13 +42,13 @@ impl BmapApp {
         let search_state =
             cx.new(|cx| InputState::new(window, cx).placeholder(t("search-placeholder", language)));
 
-        let subscription =
-            cx.subscribe_in(&search_state, window, |this, input, event, _window, cx| {
-                if let InputEvent::Change = event {
-                    this.search_query = input.read(cx).value().to_string();
-                    cx.notify();
-                }
-            });
+        cx.subscribe_in(&search_state, window, |this, input, event, _window, cx| {
+            if let InputEvent::Change = event {
+                this.search_query = input.read(cx).value().to_string();
+                cx.notify();
+            }
+        })
+        .detach();
 
         Self {
             current_page: Page::Files,
@@ -64,7 +63,6 @@ impl BmapApp {
             expanded_section: None,
             search_input: search_state,
             search_query: String::new(),
-            _search_subscription: subscription,
         }
     }
 

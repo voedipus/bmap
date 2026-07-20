@@ -7,8 +7,11 @@ mod ui;
 
 use gpui::AppContext as _;
 use gpui_component::ActiveTheme;
+use gpui_component::Root;
 use gpui_component::Theme;
 use gpui_component::ThemeMode;
+
+use crate::app::BmapApp;
 
 fn main() {
     gpui_platform::application().run(|cx| {
@@ -35,13 +38,13 @@ fn main() {
             },
             |window, cx| {
                 // Force dark theme — sync_system_appearance may return Light on some Linux compositors
-                let _ = gpui_component::Theme::sync_system_appearance(Some(window), cx);
+                let _ = Theme::sync_system_appearance(Some(window), cx);
                 if !cx.theme().is_dark() {
                     Theme::change(ThemeMode::Dark, Some(window), cx);
                 }
 
-                let view = cx.new(|cx| app::BmapApp::new(window, cx));
-                cx.new(|cx| gpui_component::Root::new(view, window, cx))
+                let view = cx.new(|cx| BmapApp::new(window, cx));
+                cx.new(|cx| Root::new(view, window, cx))
             },
         )
         .unwrap();

@@ -1,6 +1,5 @@
 //! Simple compile-time translations for English and Russian.
 
-use gpui::SharedString;
 use std::sync::LazyLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,8 +18,8 @@ impl Language {
 }
 
 /// Looks up a translated string for the given language, falling back to the key.
-pub fn t(key: &str, lang: Language) -> SharedString {
-    STRINGS.get(&(lang, key)).copied().unwrap_or(key).into()
+pub fn t(key: &'static str, lang: Language) -> &'static str {
+    STRINGS.get(&(lang, key)).copied().unwrap_or(key)
 }
 
 type Key = (Language, &'static str);

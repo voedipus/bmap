@@ -1,12 +1,8 @@
 # bmap
 
-A fast, native GUI for inspecting linker MAP files. Built with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui).
+A fast, native GUI for inspecting linker MAP files. Built with [Xilem](https://xilem.dev/) (Masonry + Vello + winit).
 
 Load a `.map` file produced by GNU ld, Clang LLD, or Metrowerks, and explore your binary's memory layout through sortable tables and drill-down views.
-
-<p align="center">
-  <img src="assets/showcase.gif" alt="Showcase">
-</p>
 
 ## Features
 
@@ -25,7 +21,8 @@ Load a `.map` file produced by GNU ld, Clang LLD, or Metrowerks, and explore you
 cargo run --release
 ```
 
-Then click **Open** and select a `.map` file.
+Then click **Open** and select a `.map` file. A sample file is provided at
+`assets/sample.map` (`cargo test` also verifies it parses).
 
 ## Build
 
@@ -39,16 +36,14 @@ The binary will be at `target/release/bmap`.
 
 ```
 src/
-├── app.rs          # Root GPUI entity, state, and update loop
+├── app.rs          # Application state, root Xilem view, file-open task
 ├── i18n.rs         # Compile-time English/Russian translations
 ├── main.rs         # Application entry point
 ├── model.rs        # MAP parsing and pure grouping functions
-├── theme.rs        # Color constants
+├── theme.rs        # Dark theme color constants
 └── ui/
     ├── empty.rs    # Empty / error state
-    ├── input.rs    # Minimal focusable search input
     ├── pages.rs    # Source files, modules, sections, summary, symbols
-    ├── table.rs    # Table header/cell helpers
     └── toolbar.rs  # Open button, page tabs, search, debug toggle
 ```
 

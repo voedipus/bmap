@@ -1,16 +1,15 @@
 //! Application state and root view.
 
-use crate::i18n::{t, Language};
-use crate::model::*;
-use crate::ui::pages;
-use crate::ui::toolbar;
-
-use gpui::prelude::*;
-use gpui::*;
-use gpui_component::input::{InputEvent, InputState};
-use gpui_component::ActiveTheme;
-use mapfile_parser::MapFile;
 use std::path::PathBuf;
+
+use mapfile_parser::MapFile;
+use xilem::WidgetView;
+use xilem::core::{MessageProxy, NoElement, ViewSequence, fork};
+use xilem::view::{CrossAxisAlignment, FlexExt as _, flex_col, sized_box, task_raw};
+
+use crate::i18n::{Language, t};
+use crate::model::*;
+use crate::ui::{empty, pages, toolbar};
 
 /// Top-level pages shown in the toolbar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +20,22 @@ pub enum Page {
     Summary,
 }
 
-pub struct BmapApp {
+/// Message sent from the background file-open task back to the app.
+#[derive(Debug)]
+pub enum FileMsg {
+    Loaded {
+        path: PathBuf,
+        entries: Vec<MapEntry>,
+    },
+    Error {
+        path: PathBuf,
+        message: String,
+    },
+    Cancelled,
+}
+
+/// All application state, mutated by event handlers and read by [`app_logic`].
+pub struct AppState {
     pub current_page: Page,
     pub language: Language,
     pub file_path: Option<PathBuf>,
@@ -32,27 +46,18 @@ pub struct BmapApp {
     pub sort_ascending: bool,
     pub drilldown_group: Option<String>,
     pub expanded_section: Option<String>,
-    pub search_input: Entity<InputState>,
     pub search_query: String,
+    /// Indices into `all_entries` shown by the symbol drill-down list.
+    pub symbol_rows: Vec<usize>,
+    /// Set while the file dialog is open; gates the dialog [`task_raw`] view.
+    pub dialog_open: bool,
 }
 
-impl BmapApp {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let language = Language::detect();
-        let search_state =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t("search-placeholder", language)));
-
-        cx.subscribe_in(&search_state, window, |this, input, event, _window, cx| {
-            if let InputEvent::Change = event {
-                this.search_query = input.read(cx).value().to_string();
-                cx.notify();
-            }
-        })
-        .detach();
-
+impl Default for AppState {
+    fn default() -> Self {
         Self {
             current_page: Page::Files,
-            language,
+            language: Language::detect(),
             file_path: None,
             error: None,
             all_entries: Vec::new(),
@@ -61,73 +66,42 @@ impl BmapApp {
             sort_ascending: false,
             drilldown_group: None,
             expanded_section: None,
-            search_input: search_state,
             search_query: String::new(),
+            symbol_rows: Vec::new(),
+            dialog_open: false,
         }
     }
+}
 
-    pub fn open_file(&mut self, cx: &mut Context<Self>) {
-        let language = self.language;
-        cx.spawn(
-            move |this: gpui::WeakEntity<BmapApp>, cx: &mut gpui::AsyncApp| {
-                let mut cx = cx.clone();
-                async move {
-                    let result = rfd::AsyncFileDialog::new()
-                        .set_title(t("open-map-file", language).to_string())
-                        .add_filter("MAP files", &["map"])
-                        .add_filter("All files", &["*"])
-                        .pick_file()
-                        .await;
-                    if let Some(handle) = result {
-                        let path = handle.path().to_path_buf();
-                        let contents = cx
-                            .background_executor()
-                            .spawn({
-                                let path = path.clone();
-                                async move { std::fs::read_to_string(&path) }
-                            })
-                            .await;
-                        match contents {
-                            Ok(text) => {
-                                this.update(&mut cx, |app, cx| {
-                                    app.load_file(path, text, cx);
-                                    cx.notify();
-                                })
-                                .ok();
-                            }
-                            Err(err) => {
-                                let path_str = path.display().to_string();
-                                this.update(&mut cx, move |app, cx| {
-                                    app.error = Some(format!("failed to read {path_str}: {err}"));
-                                    cx.notify();
-                                })
-                                .ok();
-                            }
-                        }
-                    }
-                }
-            },
-        )
-        .detach();
-    }
-
-    fn load_file(&mut self, path: PathBuf, contents: String, cx: &mut Context<Self>) {
-        self.file_path = Some(path);
-        self.error = None;
-        let map = MapFile::new_from_map_str(&contents);
-        self.all_entries = build_symbol_entries(&map);
-        self.recompute_groups();
-        self.drilldown_group = None;
-        self.expanded_section = None;
-        self.search_query.clear();
-        cx.notify();
-    }
-
+impl AppState {
     pub fn recompute_groups(&mut self) {
         self.aggregate = aggregate(&self.all_entries, self.show_debug);
     }
 
-    pub fn select_page(&mut self, page: Page, cx: &mut Context<Self>) {
+    /// Rebuild the filtered and sorted drill-down row list from the current state.
+    pub fn recompute_symbol_rows(&mut self) {
+        let Some(group) = self.drilldown_group.clone() else {
+            self.symbol_rows.clear();
+            return;
+        };
+        let mut indices = drill_indices(&self.all_entries, &group, self.show_debug);
+        if !self.search_query.is_empty() {
+            let q = self.search_query.to_lowercase();
+            indices.retain(|&i| {
+                let e = &self.all_entries[i];
+                e.name.to_lowercase().contains(&q)
+                    || e.path_str.to_lowercase().contains(&q)
+                    || e.section_type.to_lowercase().contains(&q)
+            });
+        }
+        indices.sort_by_key(|&i| self.all_entries[i].size);
+        if !self.sort_ascending {
+            indices.reverse();
+        }
+        self.symbol_rows = indices;
+    }
+
+    pub fn select_page(&mut self, page: Page) {
         if self.current_page == page {
             return;
         }
@@ -135,56 +109,119 @@ impl BmapApp {
         self.drilldown_group = None;
         self.expanded_section = None;
         self.search_query.clear();
-        cx.notify();
     }
 
-    pub fn toggle_debug(&mut self, cx: &mut Context<Self>) {
-        self.show_debug = !self.show_debug;
-        self.recompute_groups();
-        cx.notify();
-    }
-
-    pub fn toggle_group_sort(&mut self, cx: &mut Context<Self>) {
-        self.sort_ascending = !self.sort_ascending;
-        cx.notify();
-    }
-
-    pub fn drill_into(&mut self, group: String, cx: &mut Context<Self>) {
+    pub fn drill_into(&mut self, group: String) {
         self.drilldown_group = Some(group);
         self.search_query.clear();
-        cx.notify();
     }
 
-    pub fn drill_out(&mut self, cx: &mut Context<Self>) {
+    pub fn drill_out(&mut self) {
         self.drilldown_group = None;
         self.search_query.clear();
-        cx.notify();
     }
 
-    pub fn toggle_section(&mut self, name: String, cx: &mut Context<Self>) {
+    pub fn toggle_section(&mut self, name: String) {
         if self.expanded_section.as_ref() == Some(&name) {
             self.expanded_section = None;
         } else {
             self.expanded_section = Some(name);
         }
-        cx.notify();
     }
 }
 
-impl Render for BmapApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(toolbar::render(self, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .overflow_hidden()
-                    .child(pages::render(self, cx)),
-            )
+/// Root component: recomposes the whole window whenever any state changes.
+pub fn app_logic(data: &mut AppState) -> impl WidgetView<AppState> + use<> {
+    // Keep the virtualized symbol list in sync with the current filters.
+    if data.drilldown_group.is_some() {
+        data.recompute_symbol_rows();
     }
+
+    fork(
+        flex_col((toolbar::render(data), sized_box(content(data)).flex(1.0)))
+            .cross_axis_alignment(CrossAxisAlignment::Stretch),
+        data.dialog_open.then(|| file_dialog_task(data.language)),
+    )
+}
+
+fn content(data: &mut AppState) -> Box<xilem::AnyWidgetView<AppState>> {
+    if data.all_entries.is_empty() {
+        return empty::render(data);
+    }
+    match data.current_page {
+        Page::Files | Page::Modules => {
+            if data.drilldown_group.is_some() {
+                pages::symbols_view(data)
+            } else if data.current_page == Page::Files {
+                pages::files_view(data)
+            } else {
+                pages::modules_view(data)
+            }
+        }
+        Page::Sections => pages::sections_view(data),
+        Page::Summary => pages::summary_view(data),
+    }
+}
+
+/// Background task that shows the file dialog, reads and parses the chosen file
+/// on a blocking thread, then sends the result back to the app.
+///
+/// Returns a `ViewSequence` (not a `WidgetView`): the task has no widget element
+/// and is wired into the tree through `fork`'s alongside view.
+fn file_dialog_task(
+    language: Language,
+) -> impl ViewSequence<AppState, (), xilem::ViewCtx, NoElement> + use<> {
+    let title = t("open-map-file", language);
+    task_raw(
+        move |proxy: MessageProxy<FileMsg>, _state: &mut AppState| async move {
+            let picked = rfd::AsyncFileDialog::new()
+                .set_title(title)
+                .add_filter("MAP files", &["map"])
+                .add_filter("All files", &["*"])
+                .pick_file()
+                .await;
+            let Some(handle) = picked else {
+                let _ = proxy.message(FileMsg::Cancelled);
+                return;
+            };
+            let path = handle.path().to_path_buf();
+            let result =
+                xilem::tokio::task::spawn_blocking(move || match std::fs::read_to_string(&path) {
+                    Ok(text) => {
+                        let map = MapFile::new_from_map_str(&text);
+                        FileMsg::Loaded {
+                            path,
+                            entries: build_symbol_entries(&map),
+                        }
+                    }
+                    Err(err) => FileMsg::Error {
+                        path,
+                        message: err.to_string(),
+                    },
+                })
+                .await
+                .expect("file read task should not panic");
+            let _ = proxy.message(result);
+        },
+        |data: &mut AppState, msg| match msg {
+            FileMsg::Loaded { path, entries } => {
+                data.dialog_open = false;
+                data.file_path = Some(path);
+                data.error = None;
+                data.all_entries = entries;
+                data.recompute_groups();
+                data.drilldown_group = None;
+                data.expanded_section = None;
+                data.search_query.clear();
+                data.symbol_rows.clear();
+            }
+            FileMsg::Error { path, message } => {
+                data.dialog_open = false;
+                data.error = Some(format!("failed to read {}: {message}", path.display()));
+            }
+            FileMsg::Cancelled => {
+                data.dialog_open = false;
+            }
+        },
+    )
 }

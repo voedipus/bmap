@@ -1,16 +1,13 @@
 [package]
 name = "bmap"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
-description = "MAP file memory analyzer"
+description = "MAP file memory analyzer (Xilem)"
 repository = "https://github.com/bmap"
 
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["x11", "wayland"] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-anyhow = "1.0"
+xilem = { git = "https://github.com/linebender/xilem" }
 mapfile_parser = { version = "2.12", features = ["serde"] }
 rfd = "0.17"
 sys-locale = "0.3"

@@ -320,3 +320,34 @@ pub fn archive_name(object_path: &str) -> String {
             .unwrap_or_else(|| object_path.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_map_parses_and_aggregates() {
+        let text = include_str!("../assets/sample.map");
+        let map = MapFile::new_from_map_str(text);
+        let entries = build_symbol_entries(&map);
+        assert!(
+            !entries.is_empty(),
+            "expected the sample MAP file to produce symbol entries"
+        );
+        let agg = aggregate(&entries, false);
+        assert!(agg.summary.num_symbols > 0);
+        assert!(!agg.module_groups.is_empty());
+        assert!(!agg.archive_groups.is_empty());
+        assert!(!agg.section_categories.is_empty());
+
+        // The debug filter: show_debug=false hides .debug_* / .comment / .ARM.* sections.
+        let with_debug = aggregate(&entries, true);
+        assert!(with_debug.summary.num_symbols > agg.summary.num_symbols);
+
+        // Archive grouping: libfoo.a(foo.o) and foo.o should both drill down.
+        let from_archive = drill_indices(&entries, "libfoo.a(foo.o)", false);
+        assert!(!from_archive.is_empty());
+        let from_file = drill_indices(&entries, "main.o", false);
+        assert!(!from_file.is_empty());
+    }
+}

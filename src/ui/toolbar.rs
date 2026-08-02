@@ -1,89 +1,66 @@
 //! Top application toolbar with file open, navigation tabs, search, and debug toggle.
 
-use crate::app::{BmapApp, Page};
+use xilem::masonry::layout::AsUnit;
+use xilem::masonry::properties::Padding;
+use xilem::style::Style as _;
+use xilem::view::{
+    CrossAxisAlignment, FlexExt as _, button, flex_row, label, sized_box, switch, text_button,
+    text_input,
+};
+use xilem::{AnyWidgetView, Color, WidgetView};
+
+use crate::app::{AppState, Page};
 use crate::i18n::t;
-use gpui::prelude::*;
-use gpui::*;
-use gpui_component::button::Button;
-use gpui_component::input::Input;
-use gpui_component::switch::Switch;
-use gpui_component::ActiveTheme;
+use crate::theme::{ACCENT, BORDER, FG, TOOLBAR_BG};
 
-pub fn render(app: &mut BmapApp, cx: &mut Context<BmapApp>) -> impl IntoElement {
-    let open_btn = Button::new("open-btn")
-        .label(t("open", app.language))
-        .on_click(cx.listener(|app, _event, _window, cx| {
-            app.open_file(cx);
-        }));
+pub fn render(data: &mut AppState) -> impl WidgetView<AppState> + use<> {
+    let open_btn = text_button(t("open", data.language), |data: &mut AppState| {
+        data.dialog_open = true;
+    });
 
-    let active_bg = cx.theme().primary;
-    let active_fg = cx.theme().background;
-    let fg = cx.theme().foreground;
-    let hover_bg = cx.theme().accent.opacity(0.15);
-
-    let mut tab_divs = Vec::new();
     let tab_specs = [
-        (Page::Files, t("files", app.language)),
-        (Page::Modules, t("modules", app.language)),
-        (Page::Sections, t("sections", app.language)),
-        (Page::Summary, t("summary", app.language)),
+        (Page::Files, t("files", data.language)),
+        (Page::Modules, t("modules", data.language)),
+        (Page::Sections, t("sections", data.language)),
+        (Page::Summary, t("summary", data.language)),
     ];
-    for (i, (page, label)) in tab_specs.into_iter().enumerate() {
-        let active = app.current_page == page;
-        tab_divs.push(
-            div()
-                .id(SharedString::from(format!("tab-{i}")))
-                .px_3()
-                .py_1()
-                .rounded_md()
-                .cursor_pointer()
-                .text_sm()
-                .text_color(if active { active_fg } else { fg })
-                .bg(if active {
-                    active_bg
-                } else {
-                    hsla(0., 0., 0., 0.)
-                })
-                .hover(move |s| s.bg(if active { active_bg } else { hover_bg }))
-                .child(label)
-                .on_click(cx.listener(move |app, _event, _window, cx| {
-                    app.select_page(page, cx);
-                })),
-        );
-    }
+    let tabs: Vec<Box<AnyWidgetView<AppState>>> = tab_specs
+        .into_iter()
+        .map(|(page, label_text)| {
+            let active = data.current_page == page;
+            button(
+                label(label_text).color(if active { TOOLBAR_BG } else { FG }),
+                move |data: &mut AppState| data.select_page(page),
+            )
+            .padding(Padding::from_vh(4.0.px(), 12.0.px()))
+            .corner_radius(6.0.px())
+            .background_color(if active { ACCENT } else { Color::TRANSPARENT })
+            .boxed()
+        })
+        .collect();
 
-    let debug_label = t("label-debug", app.language);
-    let debug_toggle = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .px_3()
-        .cursor_pointer()
-        .child(
-            Switch::new("debug-toggle")
-                .checked(app.show_debug)
-                .on_click(cx.listener(|app, checked, _window, cx| {
-                    if *checked != app.show_debug {
-                        app.toggle_debug(cx);
-                    }
-                })),
-        )
-        .child(debug_label);
+    let search = text_input(data.search_query.clone(), |data: &mut AppState, value| {
+        data.search_query = value;
+    })
+    .placeholder(t("search-placeholder", data.language))
+    .flex(1.0);
 
-    let search = Input::new(&app.search_input).flex_1().appearance(true);
+    let debug_toggle = flex_row((
+        switch(data.show_debug, |data: &mut AppState, on| {
+            data.show_debug = on;
+            data.recompute_groups();
+        }),
+        label(t("label-debug", data.language)).text_size(13.0),
+    ))
+    .cross_axis_alignment(CrossAxisAlignment::Center)
+    .gap(6.0.px());
 
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .p_2()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .bg(cx.theme().muted)
-        .child(open_btn)
-        .children(tab_divs)
-        .child(search)
-        .child(debug_toggle)
+    sized_box(
+        flex_row((open_btn, tabs, search, debug_toggle))
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .gap(6.0.px()),
+    )
+    .background_color(TOOLBAR_BG)
+    .border(BORDER, 1.0.px())
+    .padding(Padding::from_vh(8.0.px(), 10.0.px()))
 }

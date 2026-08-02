@@ -1,0 +1,35 @@
+Archive member included to satisfy reference by file (symbol)
+
+foo.o
+    libfoo.a(foo.o)
+
+Linker script and memory map
+
+.text           0x0000000000010000       0x1000
+ .text          0x0000000000010000       0x800  main.o
+                0x0000000000010000                main
+                0x0000000000010080                helper_function
+                0x0000000000010300                parse_config
+                0x0000000000010400                render_frame
+ .text          0x0000000000010800       0x800  libfoo.a(foo.o)
+                0x0000000000010800                foo_init
+                0x0000000000010850                foo_run
+                0x0000000000010a00                foo_teardown
+ .rodata        0x0000000000011000       0x200  main.o
+                0x0000000000011000                messages
+ .rodata        0x0000000000011200       0x100  libfoo.a(foo.o)
+                0x0000000000011200                foo_labels
+ .data          0x0000000000011300       0x400  main.o
+                0x0000000000011300                counter
+ .data          0x0000000000011700       0x100  libfoo.a(foo.o)
+                0x0000000000011700                foo_state
+ .bss           0x0000000000011800       0x300
+                0x0000000000011800                main.o
+ .bss           0x0000000000011800       0x300  main.o
+                0x0000000000011800                buffer
+ .bss           0x0000000000011b00       0x80   libfoo.a(foo.o)
+                0x0000000000011b00                foo_cache
+ .debug_info    0x0000000000011c00       0x500  main.o
+                0x0000000000011c00                debug_info_1
+ .comment       0x0000000000012100       0x40   main.o
+ .ARM.attributes 0x0000000000012140       0x20   main.o
